@@ -36,6 +36,10 @@ def get_acc_predictor(model, inputs, targets):
         
         acc_predictor.fit(inputs, targets)
        
+    elif model == "gin":
+        from acc_predictor.gnn import GIN
+        acc_predictor  = GIN()
+        acc_predictor.fit(inputs, targets)
 
     else:
         raise NotImplementedError
