@@ -55,14 +55,21 @@ class GNN_Surrogate(nn.Module):
         self.conv2 = GINEConv(self.mlp2)
 
         self.readout = nn.Linear(hidden_dim, output_dimension)
-        self.accuracy_predictor = Net(output_dimension)
-        self.complexity_predictor = Net(output_dimension)
+        # Concatenate pooled GIN representation with input resolution scalar.
+        predictor_input_dim = output_dimension + 1
+        self.accuracy_predictor = Net(predictor_input_dim)
+        self.complexity_predictor = Net(predictor_input_dim)
 
-    def forward(self, x, edge_index, batch):
+    def forward(self, x, edge_index, batch, input_resolution):
         x = self.conv1(x=x, edge_index=edge_index)
         x = self.conv2(x=x, edge_index=edge_index)
         x = global_add_pool(x, batch)
         x = self.readout(x)
+
+        if input_resolution.dim() == 1:
+            input_resolution = input_resolution.unsqueeze(1)
+
+        x = torch.cat((x, input_resolution), dim=1)
         predicted_accuracy = self.accuracy_predictor(x)
         predicted_complexity = self.complexity_predictor(x)
         return predicted_accuracy, predicted_complexity
@@ -84,10 +91,14 @@ class GIN:
 
     def fit(self, x, y, **kwargs):
         train_graphs, input_resolutions = self.arch_encoder.build_graph_dataset(x, y)
+        for graph, input_resolution in zip(train_graphs, input_resolutions):
+            graph.input_resolution = torch.tensor([input_resolution], dtype=torch.float32)
         self.model = train(self.model, train_graphs, **kwargs)
 
     def predict(self, test_data, device='cpu'):
         query_graphs, input_resolutions = self.arch_encoder.build_graph_dataset(test_data)
+        for graph, input_resolution in zip(query_graphs, input_resolutions):
+            graph.input_resolution = torch.tensor([input_resolution], dtype=torch.float32)
         return predict(self.model, query_graphs, device=device)
 
 
@@ -158,7 +169,7 @@ def train_one_epoch(net, loader, criterion, optimizer, device):
         optimizer.zero_grad()
 
         batch = batch.to(device)
-        pred_acc, pred_complex = net(batch.x, batch.edge_index, batch.batch)
+        pred_acc, pred_complex = net(batch.x, batch.edge_index, batch.batch, batch.input_resolution)
         pred = torch.cat((pred_acc, pred_complex), dim=1)
         target = batch.y.view_as(pred)
         loss = criterion(pred, target)
@@ -178,7 +189,7 @@ def infer(net, loader, criterion, device):
     with torch.no_grad():
         for batch in loader:
             batch = batch.to(device)
-            pred_acc, pred_complex = net(batch.x, batch.edge_index, batch.batch)
+            pred_acc, pred_complex = net(batch.x, batch.edge_index, batch.batch, batch.input_resolution)
             pred = torch.cat((pred_acc, pred_complex), dim=1)
             target = batch.y.view_as(pred)
             loss = criterion(pred, target)
@@ -194,7 +205,7 @@ def validate(net, loader, device):
         pred_list, target_list = [], []
         for batch in loader:
             batch = batch.to(device)
-            pred_acc, pred_complex = net(batch.x, batch.edge_index, batch.batch)
+            pred_acc, pred_complex = net(batch.x, batch.edge_index, batch.batch, batch.input_resolution)
             pred = torch.cat((pred_acc, pred_complex), dim=1)
             target = batch.y.view_as(pred)
             pred_list.append(pred.cpu())
@@ -220,7 +231,7 @@ def predict(net, query, device):
     with torch.no_grad():
         for batch in loader:
             batch = batch.to(device)
-            pred_acc, pred_complex = net(batch.x, batch.edge_index, batch.batch)
+            pred_acc, pred_complex = net(batch.x, batch.edge_index, batch.batch, batch.input_resolution)
             pred = torch.cat((pred_acc, pred_complex), dim=1)
             preds.append(pred.cpu())
 

@@ -37,7 +37,7 @@ class ArchitectureToGraphEncoder:
                 graph.y = torch.tensor(y_np[idx], dtype=torch.float32)
 
             graph_data.append(graph)
-            input_resolutions.append(data['r'])
+            input_resolutions.append(arch['r'])
 
         return graph_data, input_resolutions
     
