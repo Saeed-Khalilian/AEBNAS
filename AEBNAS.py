@@ -29,6 +29,7 @@ class MSuNAS:
         self.n_iter = kwargs.pop('n_iter', 8)  # number of architectures to train in each iteration
         self.predictor = kwargs.pop('predictor', 'rbf')  # which surrogate model to fit
         self.sec_predictor = kwargs.pop('sec_predictor', 'rbf')  # which surrogate model to fit
+        self.combined_predictors = ("gin", "transformer") #list of "combined" predictors predicting both accuracy and complexity
         self.n_gpus = kwargs.pop('n_gpus', 1)  # number of available gpus
         self.gpu = kwargs.pop('gpu', 1)  # required number of gpus per evaluation job
         self.data = kwargs.pop('data', '../data')  # location of the data files
@@ -107,13 +108,19 @@ class MSuNAS:
         # main loop of the search
         for it in range(it_start, it_start + self.iterations + 1):
             print("fit predictors")
-            acc_predictor, a_top1_err_pred = self._fit_acc_predictor(archive)
-            compl_predictor = None
-            if self.sec_predictor is not None:
-              compl_predictor, a_compl_err_pred = self._fit_compl_predictor(archive)
-            
-            print("starting next")
-            candidates, c_top1_err_pred, c_compl_err_pred = self._next(archive, acc_predictor, compl_predictor, self.n_iter)
+            if self.predictor in self.combined_predictors:# fit once
+                predictor, predictions = self._fit_comb_predictor(archive)
+                a_top1_err_pred = predictions[:, 0]
+                a_compl_err_pred = predictions[:, 1]
+                print("starting next")
+                candidates, c_top1_err_pred, c_compl_err_pred = self._next(archive, predictor, predictor, self.n_iter)
+            else:   
+                acc_predictor, a_top1_err_pred = self._fit_acc_predictor(archive)
+                compl_predictor = None
+                if self.sec_predictor is not None:
+                    compl_predictor, a_compl_err_pred = self._fit_compl_predictor(archive)
+                print("starting next")
+                candidates, c_top1_err_pred, c_compl_err_pred = self._next(archive, acc_predictor, compl_predictor, self.n_iter)
             
             c_top1_err, complexity, util ,thresholds = self._evaluate(candidates, it=it)
             if 'eembv3' in self.supernet_path: 
@@ -125,7 +132,13 @@ class MSuNAS:
             # check for accuracy predictor's performance
             rmse, rho, tau = get_correlation(
                 np.vstack((a_top1_err_pred, c_top1_err_pred)), np.array([x[1] for x in archive] + c_top1_err))
-            print("checked accuarcy predictors performance")
+            print("checked accuracy predictors performance")
+
+            print("completed evaluation")
+            # check for complexity predictor's performance
+            rmse_c, rho_c, tau_c = get_correlation(
+                np.vstack((a_top1_err_pred, c_top1_err_pred)), np.array([x[1] for x in archive] + c_top1_err))
+            print("checked complexity predictors performance")
           
             for member in zip(candidates, c_top1_err, complexity, util):
                 archive.append(member)
@@ -144,7 +157,7 @@ class MSuNAS:
             print("fitting {}: RMSE = {:.4f}, Spearman's Rho = {:.4f}, Kendall�s Tau = {:.4f}".format(self.predictor, rmse, rho, tau))
                 
             #modification, printing of this is always of as the thing where it calculates the numbers does not work
-            if 0==1 and self.sec_predictor is not None:
+            if 1==1 and self.sec_predictor is not None:
                 print("fitting {}: RMSE = {:.4f}, Spearman's Rho = {:.4f}, Kendall�s Tau = {:.4f}".format(
                     self.predictor, rmse_c, rho_c, tau_c))
 
@@ -272,6 +285,16 @@ class MSuNAS:
 
         return sec_predictor, sec_predictor.predict(inputs)
 
+    def _fit_comb_predictor(self, archive):
+        inputs = np.array([x[0] for x in archive])
+        targets = np.empty((inputs.shape[0], 2))
+        targets[:,0] = np.array([x[1] for x in archive])
+        targets[:,1] = np.array([np.dot(x[2], x[3]) for x in archive])
+        
+        comb_predictor = get_acc_predictor(self.predictor, inputs, targets)
+        return comb_predictor, comb_predictor.predict(inputs)
+
+
     def _next(self, archive, acc_predictor, compl_predictor, K):
         """ searching for next K candidate for high-fidelity evaluation (lower level) """
 
@@ -285,7 +308,9 @@ class MSuNAS:
         problem = AuxiliarySingleLevelProblem(
             self.search_space, acc_predictor, compl_predictor, self.sec_obj, self.dataset,
             {'n_classes': self.n_classes, 'supernet_path': self.supernet_path, 'pretrained': self.pretrained},
-            pmax = self.pmax, fmax = self.fmax, amax = self.amax, wp = self.wp, wf = self.wf, wa = self.wa, penalty = self.penalty, target_macs= self.target_macs, alpha_macs = self.alpha_macs)
+            pmax = self.pmax, fmax = self.fmax, amax = self.amax, wp = self.wp, wf = self.wf, wa = self.wa, 
+            penalty = self.penalty, target_macs= self.target_macs, alpha_macs = self.alpha_macs, 
+            combined_predictors=self.combined_predictors)
         
         # initiate a multi-objective solver to optimize the problem
         method = get_algorithm(
@@ -311,11 +336,18 @@ class MSuNAS:
             candidates.append(self.search_space.decode(x))
 
         # decode integer bit-string to config and also return predicted top1_err
-        compl_predicted = None
-        if compl_predictor is not None:
-          compl_predicted = compl_predictor.predict(pop.get("X"))
-        
-        return candidates, acc_predictor.predict(pop.get("X")), compl_predicted
+        if self.predictor in self.combined_predictors:# fit once
+           #use acc_predictor as both
+           predictions = acc_predictor.predict(pop.get("X"))
+           acc_predicted = predictions[:, 0]
+           compl_predicted = predictions[:, 1]
+           return candidates, acc_predicted, compl_predicted
+        else: #use seperate predictors
+            compl_predicted = None
+            if compl_predictor is not None:
+                compl_predicted = compl_predictor.predict(pop.get("X"))
+            
+            return candidates, acc_predictor.predict(pop.get("X")), compl_predicted
 
     @staticmethod
     def _subset_selection(pop, nd_F, K):
@@ -344,7 +376,8 @@ class AuxiliarySingleLevelProblem(Problem):
     """ The optimization problem for finding the next N candidate architectures """
 
     def __init__(self, search_space, acc_predictor, compl_predictor, sec_obj='flops', dataset='imagenet',supernet=None, pmax = 2, fmax = 100, amax = 5,
-        wp = 1, wf = 1/40, wa = 1, penalty = 10**10, target_macs = 2.44, alpha_macs = 5.0):
+        wp = 1, wf = 1/40, wa = 1, penalty = 10**10, target_macs = 2.44, alpha_macs = 5.0, combined_predictors= ("gin", "transformer")):
+        """If acc_predictor.name in combined_predictors, the acc_predictor is used for both acc and compl predictions"""
         n_var = search_space.n_var #CNAS n_var=46, ADACNAS= 46 + 4(#bits for selection schemes) = 50
         if (search_space.supernet == 'resnet50_he'):
            n_var = 10
@@ -369,6 +402,7 @@ class AuxiliarySingleLevelProblem(Problem):
         self.penalty = penalty
         self.target_macs=target_macs
         self.alpha_macs = alpha_macs
+        self.combined_predictors = combined_predictors
 
         self.engine = OFAEvaluator(
             n_classes=supernet['n_classes'], model_path=supernet['supernet_path'], pretrained = supernet['pretrained'] )
@@ -377,21 +411,27 @@ class AuxiliarySingleLevelProblem(Problem):
         
         f = np.full((x.shape[0], self.n_obj), np.nan)
 
-        top1_err = self.acc_predictor.predict(x)[:, 0]  # predicted top1 error
-
         desired_macs = self.target_macs
         alpha = self.alpha_macs
 
-        if self.compl_predictor is not None:          
-          compl_err = self.compl_predictor.predict(x)[:, 0]  # predicted compl error
 
-          #Mean Absolute Percentage Error
-          MAEP_error =np.absolute( ((compl_err - desired_macs)/ desired_macs)  ) *100
-          f[:, 0] = top1_err  + 0.1 * MAEP_error
-          f[:, 1] =  MAEP_error #* alpha
- 
+        if  self.acc_predictor.name in self.combined_predictors: #fit once
+            predictions = self.acc_predictor.predict(x)  # predicted top1 error and compl error
+            top1_err = predictions[:, 0]
+            compl_err = predictions[:, 1] 
+            #Mean Absolute Percentage Error
+            MAEP_error =np.absolute( ((compl_err - desired_macs)/ desired_macs)  ) *100
+            f[:, 0] = top1_err  + 0.1 * MAEP_error
+            f[:, 1] =  MAEP_error #* alpha
+        elif self.compl_predictor is not None:
+            top1_err = self.acc_predictor.predict(x)[:, 0]  # predicted top1 error
+            compl_err = self.compl_predictor.predict(x)[:, 0]  # predicted compl error
+            #Mean Absolute Percentage Error
+            MAEP_error =np.absolute( ((compl_err - desired_macs)/ desired_macs)  ) *100
+            f[:, 0] = top1_err  + 0.1 * MAEP_error
+            f[:, 1] =  MAEP_error #* alpha              
         else:
-
+            top1_err = self.acc_predictor.predict(x)[:, 0]  # predicted top1 error
             for i, (_x, acc_err) in enumerate(zip(x, top1_err)):
 
                 if(self.ss.supernet == 'resnet50_he'):
@@ -476,7 +516,9 @@ if __name__ == '__main__':
     parser.add_argument('--n_iter', type=int, default=8,
                         help='number of architectures to high-fidelity eval (low level) in each iteration')
     parser.add_argument('--predictor', type=str, default='mlp',
-                        help='which accuracy predictor model to fit (rbf/gp/cart/mlp/as)')
+                        help='which accuracy predictor model to fit (rbf/gp/cart/mlp/as/gin/transformer).' \
+                        ' If gin/transformer, sec_predictor is ignored, '
+                        'and one predictor is made predicting both accuracy and complexity')
     parser.add_argument('--sec_predictor', type=str, default='mlp',
                         help='which complexity predictor model to fit (rbf/gp/cart/mlp/as)')
     parser.add_argument('--n_gpus', type=int, default=8,
