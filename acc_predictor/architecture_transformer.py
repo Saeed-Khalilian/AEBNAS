@@ -3,13 +3,20 @@ import torch
 from torch_geometric.data import Data
 
 class ArchitectureToGraphEncoder:
-    def __init__(self):
-        self._node_feature_dim = 18
-        self._interpol_options = [8,10,12]
-        self._kernel_options = [3,5,7]
-        self._expansion_options = [1,2,3,4,6]
-        self._num_of_blocks = 5
-        self._max_depth = 4
+    def __init__(self,node_feature_dim=18, 
+                 interpol_options=[8,10,12], 
+                 kernel_options= [3,5,7],
+                 expansion_options = [1,2,3,4,6], 
+                 num_of_blocks = 5, max_depth = 4, 
+                 min_res=192, max_res=256):
+        self._node_feature_dim = node_feature_dim
+        self._interpol_options = interpol_options
+        self._kernel_options = kernel_options
+        self._expansion_options = expansion_options
+        self._num_of_blocks = num_of_blocks
+        self._max_depth = max_depth
+        self._min_resolution = min_res
+        self._max_resolution = max_res
 
     def build_graph_dataset(self, data, targets=None):
         if isinstance(data, dict):
@@ -37,7 +44,8 @@ class ArchitectureToGraphEncoder:
                 graph.y = torch.tensor(y_np[idx], dtype=torch.float32)
 
             graph_data.append(graph)
-            input_resolutions.append(arch['r'])
+            normalized_resolution = (arch['r'] - self._min_resolution) / (self._max_resolution - self._min_resolution)
+            input_resolutions.append(normalized_resolution)
 
         return graph_data, input_resolutions
     

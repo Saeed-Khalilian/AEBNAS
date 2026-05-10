@@ -61,6 +61,7 @@ class GNN_Surrogate(nn.Module):
         self.complexity_predictor = Net(predictor_input_dim)
 
     def forward(self, x, edge_index, batch, input_resolution):
+        """Assumes that hte input resolution is normalized to [0,1]"""
         x = self.conv1(x=x, edge_index=edge_index)
         x = self.conv2(x=x, edge_index=edge_index)
         x = global_add_pool(x, batch)
@@ -81,13 +82,6 @@ class GIN:
         self.model = GNN_Surrogate(**kwargs)
         self.name = 'gin'
         self.arch_encoder = ArchitectureToGraphEncoder()
-        # self._node_feature_dim = 18
-        # self._interpol_options = [8,10,12]
-        # self._kernel_options = [3,5,7]
-        # self._expansion_options = [1,2,3,4,6]
-        # self._num_of_blocks = 5
-        # self._max_depth = 4
-
 
     def fit(self, x, y, **kwargs):
         train_graphs, input_resolutions = self.arch_encoder.build_graph_dataset(x, y)
