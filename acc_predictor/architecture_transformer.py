@@ -53,7 +53,9 @@ class ArchitectureToGraphEncoder:
         """
         Convertes encoded architecture from the sample space to a graph encoding 
         to be used for the GNN.
-        Parameters:
+
+        Params:
+
             arch: dictionary with structure 
             {'ks': [...],         # kernel sizes\n
             'e': [...],          # expansion ratios\n
@@ -72,16 +74,17 @@ class ArchitectureToGraphEncoder:
             x, edge_index: x is the node representations, shape [num_nodes, num_node_features=18]. 
             edge_index is the adjacency list, shape [2, num_edges]
         """
-        x, edge_index_transposed = [], []
+        x, edge_index_transposed = [], [] #for the result
         assert len(arch['ks']) == len(arch['e']) == sum(arch['d'])
         assert len(arch['d']) == self._num_of_blocks, f"{arch['d']} does not have length {self._num_of_blocks} as expected"
+        assert len(arch["e_ks"]) ==  self._num_of_blocks - 1
         #setup
         node_index = 0  #index over kernels and expansions 
         #access the index of the last node of a backbone
-        backbone_end_node_index = {0:-1, 1:-1, 2:-1, 3:-1, 4:-1}#used to connect the early exits to 
-        
-        #create all nodes for the backbone first
-        for block in range(5):
+        backbone_end_node_index = {block: -1 for block in range(self._num_of_blocks)}#used to connect the early exits to 
+
+        for block in range(self._num_of_blocks):
+            #CREATE BACKBONE NODES
             for depth in range(arch['d'][block]):
                 conv_node = self.__create_convolution_node(block, 
                                                            depth, 
@@ -108,9 +111,9 @@ class ArchitectureToGraphEncoder:
                 
                 node_index +=1
 
-        #now create nodes for all early exits
-        assert len(arch["e_ks"]) == 4 
-        for block in range(4): #the last block cant have an early exit
+            #now create nodes for all early exits but skip last block as the last block cant have an early exit
+            if block==self._num_of_blocks - 1:
+                break
             #assertions
             assert len(arch["e_ks"][block]) == 2
             for layer_idx in range(2):
@@ -211,4 +214,3 @@ class ArchitectureToGraphEncoder:
         node_feature[5] = normalized_depth
         node_feature[14] = float(threshold) 
         return node_feature
-  
