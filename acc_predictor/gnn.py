@@ -1,4 +1,4 @@
-from torch_geometric.nn import GINEConv, global_add_pool
+from torch_geometric.nn import GINConv, global_add_pool
 from torch_geometric.loader import DataLoader
 import numpy as np
 import torch
@@ -45,14 +45,14 @@ class GNN_Surrogate(nn.Module):
                 nn.ReLU(),
                 nn.Linear(hidden_dim, hidden_dim),
                 nn.ReLU())
-        self.conv1 = GINEConv(self.mlp1)
+        self.conv1 = GINConv(self.mlp1)
 
         self.mlp2 = nn.Sequential(
                 nn.Linear(hidden_dim, hidden_dim),
                 nn.ReLU(),
                 nn.Linear(hidden_dim, hidden_dim),
                 nn.ReLU())
-        self.conv2 = GINEConv(self.mlp2)
+        self.conv2 = GINConv(self.mlp2)
 
         self.readout = nn.Linear(hidden_dim, output_dimension)
         # Concatenate pooled GIN representation with input resolution scalar.
@@ -75,7 +75,7 @@ class GNN_Surrogate(nn.Module):
         predicted_complexity = self.complexity_predictor(x)
         return predicted_accuracy, predicted_complexity
 
-from architecture_transformer import ArchitectureToGraphEncoder
+from acc_predictor.architecture_transformer import ArchitectureToGraphEncoder
 class GIN:
     """ GIN """
     def __init__(self, arch_encoder_kwargs=None, **kwargs):

@@ -348,11 +348,12 @@ class MSuNAS:
 
         # decode integer bit-string to config and also return predicted top1_err
         if self.predictor in self.combined_predictors:# fit once
-           #use acc_predictor as both
-           predictions = acc_predictor.predict(pop.get("X"))
-           acc_predicted = predictions[:, 0]
-           compl_predicted = predictions[:, 1]
-           return candidates, acc_predicted, compl_predicted
+            #use acc_predictor as both
+            decoded_pop_X = np.array([self.search_space.decode(x) for x in pop.get("X")])
+            predictions = acc_predictor.predict(decoded_pop_X)
+            acc_predicted = predictions[:, 0]
+            compl_predicted = predictions[:, 1]
+            return candidates, acc_predicted, compl_predicted
         else: #use seperate predictors
             compl_predicted = None
             if compl_predictor is not None:
@@ -427,7 +428,9 @@ class AuxiliarySingleLevelProblem(Problem):
 
 
         if  self.acc_predictor.name in self.combined_predictors: #fit once
-            predictions = self.acc_predictor.predict(x)  # predicted top1 error and compl error
+            # Decode integer-encoded architectures to dict format for predictors
+            decoded_x = np.array([self.ss.decode(xi) for xi in x])
+            predictions = self.acc_predictor.predict(decoded_x)  # predicted top1 error and compl error
             top1_err = predictions[:, 0]
             compl_err = predictions[:, 1] 
             #Mean Absolute Percentage Error

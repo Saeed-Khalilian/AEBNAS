@@ -129,17 +129,18 @@ class ArchitectureToGraphEncoder:
         assert len(arch['d']) == self._num_of_blocks, f"{arch['d']} does not have length {self._num_of_blocks} as expected"
         assert len(arch["e_ks"]) ==  self._num_of_blocks - 1
         #setup
-        node_index = 0  #index over kernels and expansions 
+        node_index = 0  # global index over all nodes added to x
+        conv_index = 0  # index over backbone convolutions (for arch['ks'] / arch['e'])
         #access the index of the last node of a backbone
         backbone_end_node_index = {block: -1 for block in range(self._num_of_blocks)}#used to connect the early exits to 
 
         for block in range(self._num_of_blocks):
             #CREATE BACKBONE NODES
             for depth in range(arch['d'][block]):
-                conv_node = self.__create_convolution_node(block, 
-                                                           depth, 
-                                                           arch['ks'][node_index], 
-                                                           arch['e'][node_index], 
+                conv_node = self.__create_convolution_node(block,
+                                                           depth,
+                                                           arch['ks'][conv_index],
+                                                           arch['e'][conv_index],
                                                            is_exit=False)
                 x.append(conv_node)
                 edge_added=False
@@ -160,6 +161,7 @@ class ArchitectureToGraphEncoder:
                 assert edge_added == True, "Something went wrong and a disconnected node was created"
                 
                 node_index +=1
+                conv_index +=1
 
             #now create nodes for all early exits but skip last block as the last block cant have an early exit
             if block==self._num_of_blocks - 1:

@@ -86,7 +86,7 @@ class TransformerSurrogate(nn.Module):
         
         return acc_pred, macs_pred
     
-from architecture_transformer import ArchitectureToGraphEncoder
+from acc_predictor.architecture_transformer import ArchitectureToGraphEncoder
 class Transformer:
     """ Transformer """
     def __init__(self, arch_encoder_kwargs=None, max_sequence_length=None, **kwargs):
