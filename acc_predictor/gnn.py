@@ -78,21 +78,22 @@ class GNN_Surrogate(nn.Module):
 from architecture_transformer import ArchitectureToGraphEncoder
 class GIN:
     """ GIN """
-    def __init__(self, **kwargs):
+    def __init__(self, arch_encoder_kwargs=None, **kwargs):
+        arch_encoder_kwargs = arch_encoder_kwargs or {}
         self.model = GNN_Surrogate(**kwargs)
         self.name = 'gin'
-        self.arch_encoder = ArchitectureToGraphEncoder()
+        self.arch_encoder = ArchitectureToGraphEncoder(**arch_encoder_kwargs)
 
     def fit(self, x, y, **kwargs):
         train_graphs, input_resolutions = self.arch_encoder.build_graph_dataset(x, y)
         for graph, input_resolution in zip(train_graphs, input_resolutions):
-            graph.input_resolution = torch.tensor([input_resolution], dtype=torch.float32)
+            graph.input_resolution = torch.tensor([[input_resolution]], dtype=torch.float32)
         self.model = train(self.model, train_graphs, **kwargs)
 
     def predict(self, test_data, device='cpu'):
         query_graphs, input_resolutions = self.arch_encoder.build_graph_dataset(test_data)
         for graph, input_resolution in zip(query_graphs, input_resolutions):
-            graph.input_resolution = torch.tensor([input_resolution], dtype=torch.float32)
+            graph.input_resolution = torch.tensor([[input_resolution]], dtype=torch.float32)
         return predict(self.model, query_graphs, device=device)
 
 
@@ -116,7 +117,6 @@ def train(net, graph_data, trn_split=0.8, pretrained=None, device='cpu',
 
     trn_loader = DataLoader(trn_data, batch_size=min(64, len(trn_data)), shuffle=True)
     vld_loader = DataLoader(vld_data, batch_size=min(64, len(vld_data)), shuffle=False)
-    all_loader = DataLoader(graph_data, batch_size=min(64, len(graph_data)), shuffle=False)
 
     # back-propagation training of a NN
     if pretrained is not None:
@@ -150,7 +150,7 @@ def train(net, graph_data, trn_split=0.8, pretrained=None, device='cpu',
                 best_loss = loss_vld
                 best_net = copy.deepcopy(net)
 
-    validate(best_net, all_loader, device=device)
+    validate(best_net, vld_loader, device=device)
 
     return best_net.to('cpu')
 

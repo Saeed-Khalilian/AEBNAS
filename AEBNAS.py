@@ -291,7 +291,18 @@ class MSuNAS:
         targets[:,0] = np.array([x[1] for x in archive])
         targets[:,1] = np.array([np.dot(x[2], x[3]) for x in archive])
         
-        comb_predictor = get_acc_predictor(self.predictor, inputs, targets)
+        arch_encoder_kwargs = {
+            'num_of_blocks': self.search_space.num_blocks,
+            'max_depth': max(self.search_space.depth),
+            'min_res': self.lr,
+            'max_res': self.ur,
+        }
+        comb_predictor = get_acc_predictor(
+            self.predictor,
+            inputs,
+            targets,
+            arch_encoder_kwargs=arch_encoder_kwargs,
+        )
         return comb_predictor, comb_predictor.predict(inputs)
 
 

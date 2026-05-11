@@ -1,4 +1,4 @@
-def get_acc_predictor(model, inputs, targets):
+def get_acc_predictor(model, inputs, targets, **kwargs):
 
     if model == 'rbf':
         
@@ -38,7 +38,7 @@ def get_acc_predictor(model, inputs, targets):
        
     elif model == "gin":
         from acc_predictor.gnn import GIN
-        acc_predictor  = GIN()
+        acc_predictor = GIN(**kwargs)
         acc_predictor.fit(inputs, targets)
 
     else:
