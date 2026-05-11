@@ -155,7 +155,7 @@ def bash_command_template(sample = 0, **kwargs):
     execution_line = "echo "
     execution_line += '"sample {}"'.format(sample)
     execution_line += " & "
-    execution_line += "CUDA_VISIBLE_DEVICES={} python3.10 evaluator.py".format(gpus)
+    execution_line += "CUDA_VISIBLE_DEVICES={} python3.7 evaluator.py".format(gpus)
     for k, v in cfg.items():
         if v is not None:
             if isinstance(v, bool):
