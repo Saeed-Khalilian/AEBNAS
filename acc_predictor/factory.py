@@ -41,6 +41,11 @@ def get_acc_predictor(model, inputs, targets, **kwargs):
         acc_predictor = GIN(**kwargs)
         acc_predictor.fit(inputs, targets)
 
+    elif model == "transformer":
+        from acc_predictor.transformer import Transformer
+        acc_predictor = Transformer(**kwargs)
+        acc_predictor.fit(inputs, targets)
+
     else:
         raise NotImplementedError
 

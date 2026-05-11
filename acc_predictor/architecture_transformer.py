@@ -18,6 +18,12 @@ class ArchitectureToGraphEncoder:
         self._min_resolution = min_res
         self._max_resolution = max_res
 
+    def max_sequence_length(self):
+        """Return the maximum number of tokens including the [CLS] token."""
+        max_backbone_nodes = self._num_of_blocks * self._max_depth
+        max_exit_nodes = max(0, self._num_of_blocks - 1) * 6
+        return 1 + max_backbone_nodes + max_exit_nodes
+
     def build_graph_dataset(self, data, targets=None):
         if isinstance(data, dict):
             data = [data]
@@ -44,10 +50,54 @@ class ArchitectureToGraphEncoder:
                 graph.y = torch.tensor(y_np[idx], dtype=torch.float32)
 
             graph_data.append(graph)
-            normalized_resolution = (arch['r'] - self._min_resolution) / (self._max_resolution - self._min_resolution)
+            normalized_resolution = self._normalize_resolution(arch['r'])
             input_resolutions.append(normalized_resolution)
 
         return graph_data, input_resolutions
+
+    def build_sequence_dataset(self, data, targets=None):
+        if isinstance(data, dict):
+            data = [data]
+
+        if targets is not None:
+            y_np = np.asarray(targets, dtype=np.float32)
+            if y_np.ndim == 1:
+                y_np = y_np.reshape(-1, 1)
+            assert len(data) == y_np.shape[0], "Inputs and targets must have the same number of samples"
+
+        max_tokens = self.max_sequence_length() - 1
+        n_samples = len(data)
+
+        sequences = np.zeros((n_samples, max_tokens, self._node_feature_dim), dtype=np.float32)
+        padding_masks = np.ones((n_samples, max_tokens + 1), dtype=bool)
+        padding_masks[:, 0] = False
+        input_resolutions = np.zeros((n_samples, 1), dtype=np.float32)
+        targets_tensor = None
+
+        if targets is not None:
+            targets_tensor = torch.tensor(y_np, dtype=torch.float32)
+
+        for idx, arch in enumerate(data):
+            if not isinstance(arch, dict):
+                raise TypeError("Transformer expects architectures as dictionaries.")
+
+            x, _ = self._convert_architecture_to_graph(arch)
+            seq_len = x.shape[0]
+            if seq_len > max_tokens:
+                raise ValueError(
+                    f"Architecture with {seq_len} nodes exceeds transformer capacity of {max_tokens} nodes."
+                )
+
+            sequences[idx, :seq_len, :] = x
+            padding_masks[idx, 1:seq_len + 1] = False
+            input_resolutions[idx, 0] = self._normalize_resolution(arch['r'])
+
+        return (
+            torch.tensor(sequences, dtype=torch.float32),
+            torch.tensor(input_resolutions, dtype=torch.float32),
+            torch.tensor(padding_masks, dtype=torch.bool),
+            targets_tensor,
+        )
     
     def _convert_architecture_to_graph(self, arch):
         """
@@ -163,6 +213,12 @@ class ArchitectureToGraphEncoder:
         else:
             edge_index = np.asarray(edge_index_transposed, dtype=np.int64).T
         return x, edge_index
+
+    def _normalize_resolution(self, resolution):
+        denom = self._max_resolution - self._min_resolution
+        if denom == 0:
+            return 0.0
+        return (resolution - self._min_resolution) / denom
     
     def __create_interpolation_node(self, block, layer, interpol_size, threshold):
         """Assumes block and layers start counting from 0"""
