@@ -109,11 +109,11 @@ class MSuNAS:
         for it in range(it_start, it_start + self.iterations + 1):
             print("fit predictors")
             if self.predictor in self.combined_predictors:# fit once
-                predictor, predictions = self._fit_comb_predictor(archive)
+                acc_predictor, predictions = self._fit_comb_predictor(archive)
                 a_top1_err_pred = predictions[:, 0]
                 a_compl_err_pred = predictions[:, 1]
                 print("starting next")
-                candidates, c_top1_err_pred, c_compl_err_pred = self._next(archive, predictor, predictor, self.n_iter)
+                candidates, c_top1_err_pred, c_compl_err_pred = self._next(archive, acc_predictor, acc_predictor, self.n_iter)
             else:   
                 acc_predictor, a_top1_err_pred = self._fit_acc_predictor(archive)
                 compl_predictor = None
@@ -131,13 +131,15 @@ class MSuNAS:
             print("completed evaluation")
             # check for accuracy predictor's performance
             rmse, rho, tau = get_correlation(
-                np.vstack((a_top1_err_pred, c_top1_err_pred)), np.array([x[1] for x in archive] + c_top1_err))
+                np.concatenate((a_top1_err_pred, c_top1_err_pred)),
+                np.array([x[1] for x in archive] + c_top1_err))
             print("checked accuracy predictors performance")
 
             print("completed evaluation")
             # check for complexity predictor's performance
             rmse_c, rho_c, tau_c = get_correlation(
-                np.vstack((a_top1_err_pred, c_top1_err_pred)), np.array([x[1] for x in archive] + c_top1_err))
+                np.concatenate((a_compl_err_pred, c_compl_err_pred)),
+                np.array([np.dot(x[2], x[3]) for x in archive] + [np.dot(c, u) for c, u in zip(complexity, util)]))
             print("checked complexity predictors performance")
           
             for member in zip(candidates, c_top1_err, complexity, util):
