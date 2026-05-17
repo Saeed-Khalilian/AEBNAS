@@ -21,8 +21,28 @@ from utils import prepare_eval_folder, MySampling, BinaryCrossover, MyMutation ,
 class MSuNAS:
   
     def __init__(self, kwargs):
+        self.kwargs = kwargs.copy() # keep a copy of original arguments
         self.save_path = kwargs.pop('save', '.tmp')  # path to save results
         self.resume = kwargs.pop('resume', None)  # resume search from a checkpoint
+        
+        # Create a unique folder for this run
+        now = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        self.run_id = f"run_{now}"
+        self.save_path = os.path.join(self.save_path, self.run_id)
+        os.makedirs(self.save_path, exist_ok=True)
+        
+        # Save experiment parameters
+        with open(os.path.join(self.save_path, "exp_config.json"), "w") as f:
+            json.dump({
+                "datetime": now,
+                "parameters": self.kwargs
+            }, f, indent=4)
+            
+        # Initialize history file
+        self.history_file = os.path.join(self.save_path, "history.csv")
+        with open(self.history_file, "w") as f:
+            f.write("iteration,n_samples,hv,acc_rmse,acc_rho,acc_tau,compl_rmse,compl_rho,compl_tau\n")
+
         self.sec_obj = kwargs.pop('sec_obj', 'flops')  # second objective to optimize simultaneously
         self.iterations = kwargs.pop('iterations', 30)  # number of iterations to run search
         self.n_doe = kwargs.pop('n_doe', 100)  # number of architectures to train before fit surrogate model
@@ -100,6 +120,14 @@ class MSuNAS:
             # store evaluated / trained architectures
             for member in zip(arch_doe, top1_err, complexity, util):                               
                 archive.append(member)
+            
+            # Log initial state (DOE)
+            F = np.column_stack(([x[1] for x in archive], [np.dot(x[2], x[3]) for x in archive]))
+            # reference point (nadir point) for calculating hypervolume
+            ref_pt = np.array([np.max(F[:, 0]), np.max(F[:, 1])])
+            hv = self._calc_hv(ref_pt, F)
+            with open(self.history_file, "a") as f:
+                f.write(f"0,{len(archive)},{hv:.4f},NaN,NaN,NaN,NaN,NaN,NaN\n")
                       
         # reference point (nadir point) for calculating hypervolume
         ref_pt = np.array([np.max([x[1] for x in archive]), np.max([np.dot(x[2], x[3]) for x in archive])])
@@ -171,6 +199,17 @@ class MSuNAS:
                                'winner': acc_predictor.winner if self.predictor == 'as' else acc_predictor.name,
                                'rmse': rmse, 'rho': rho, 'tau': tau}
                                }, handle)
+            
+            # Log to history.csv
+            n_samples = len(archive)
+            acc_metrics = f"{rmse:.4f},{rho:.4f},{tau:.4f}"
+            if self.predictor in self.combined_predictors or self.sec_predictor is not None:
+                compl_metrics = f"{rmse_c:.4f},{rho_c:.4f},{tau_c:.4f}"
+            else:
+                compl_metrics = "NaN,NaN,NaN"
+            
+            with open(self.history_file, "a") as f:
+                f.write(f"{it},{n_samples},{hv:.4f},{acc_metrics},{compl_metrics}\n")
             
 
             print("iteration complete")
