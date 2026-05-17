@@ -861,6 +861,11 @@ class RunManager:
             net.set_inference(True)  # set inference mode for early exits
             print("Updating  thethresholds for early exit branches...")
             initialized_thresholds = net.initialized_thresholds
+            num_exits = net.total_number_of_exits
+            
+            print(f"DEBUG: num_exits = {num_exits}")
+            print(f"DEBUG: initialized_thresholds = {initialized_thresholds}")
+            print(f"DEBUG: len(initialized_thresholds) = {len(initialized_thresholds)}")
 
             threshold_macs={}
             def threshold_to_macs(candidate_thresholds=None,initialized_thresholds=None):
@@ -921,10 +926,27 @@ class RunManager:
 
             checked_thresholds = set()  
             candidates = []  # to store candidate thresholds for parallel evaluation
-            # Grid search over thresholds for early exits (excluding final exit) 
-            step=0.15
-            # threshold_values = np.arange(0.1, 1.0 + step, step)
-            threshold_values=self.threhold_range if self.threhold_range is not None else threshold_values
+            # Grid search over thresholds for early exits (excluding final exit)
+            
+            # FIX: Define threshold_values first
+            step = 0.15
+            threshold_values = np.arange(0.1, 1.0 + step, step)
+            
+            # Use custom range if available, else use default
+            if hasattr(self, 'threhold_range') and self.threhold_range is not None:
+                threshold_values = self.threhold_range
+            
+            print(f"DEBUG: threshold_values = {threshold_values}")
+            print(f"DEBUG: will generate {len(list(product(threshold_values, repeat=num_exits)))} threshold combinations")
+            
+            # SAFETY CHECK: If no early exits, skip threshold optimization
+            if num_exits == 0:
+                print("WARNING: Network has 0 early exits. Skipping threshold optimization.")
+                current_thresholds = list(net.threshold) if hasattr(net, 'threshold') else [1.0]
+                current_utils = np.zeros(len(current_thresholds) + 1)
+                current_utils[-1] = 1.0
+                current_avg_macs = self.info.get('macs', [1.0])[0] if 'macs' in self.info else 1.0
+                return current_thresholds, self.info.get('top1', 0), current_avg_macs, current_utils
             
             for thresholds in product(threshold_values, repeat=num_exits):
                 thresholds = list(thresholds)
@@ -947,17 +969,68 @@ class RunManager:
 
                 checked_thresholds.add(tuple(thresholds))
                 candidates.append((thresholds, num_exits, initialized_thresholds,  macs_list, self.target_macs, self.alpha_macs))
-                # score, acc, avg_macs, norm_avg_macs, utils= self.evaluate_thresholds(num_exits, thresholds, initialized_thresholds, all_data)
             
             global validation_conf_data
             validation_conf_data = all_data
 
             from multiprocessing import Pool, cpu_count
             print(f"Total configurations to evaluate: {len(checked_thresholds)}")
-            with Pool(processes=min(20, cpu_count())) as pool:
-                        results = pool.map(evaluate_thresholds, candidates )
+            print(f"Total valid candidates (after filtering): {len(candidates)}")
+            
+            if len(candidates) == 0:
+                # No valid threshold candidates were generated. Keep the current thresholds
+                # and return a conservative fallback rather than crashing.
+                print("WARNING: No valid threshold candidates generated. Using current network thresholds.")
+                current_thresholds = list(net.threshold) if hasattr(net, 'threshold') else [0.5] * num_exits
+                current_utils = np.zeros(num_exits + 1)
+                current_utils[-1] = 1.0
+                current_avg_macs = threshold_to_macs(candidate_thresholds=current_thresholds, initialized_thresholds=initialized_thresholds)
+                return current_thresholds, self.info.get('top1', 0), current_avg_macs, current_utils
 
+            # Try parallel evaluation first, fall back to sequential if it fails
+            results = []
+            use_sequential = False
+            
+            try:
+                with Pool(processes=min(20, cpu_count())) as pool:
+                    results = pool.map(evaluate_thresholds, candidates, chunksize=max(1, len(candidates)//20))
+                    
+                # Check if results are empty, which indicates a silent failure in workers
+                if len(results) == 0:
+                    print("WARNING: Multiprocessing pool returned empty results. Switching to sequential evaluation.")
+                    use_sequential = True
+            except Exception as e:
+                print(f"WARNING: Multiprocessing failed with error: {e}")
+                print("Switching to sequential evaluation.")
+                use_sequential = True
+            
+            # Fall back to sequential evaluation if parallel failed
+            if use_sequential:
+                print(f"Evaluating {len(candidates)} threshold configurations sequentially...")
+                results = []
+                for i, candidate_args in enumerate(candidates):
+                    try:
+                        result = evaluate_thresholds(candidate_args)
+                        results.append(result)
+                        if (i + 1) % 100 == 0:
+                            print(f"  Completed {i + 1}/{len(candidates)} configurations")
+                    except Exception as e:
+                        print(f"  Error evaluating configuration {i}: {e}")
+                        continue
+                
+                if len(results) == 0:
+                    print("ERROR: Sequential evaluation also failed or produced no results.")
+                    print("Using current network thresholds as fallback.")
+                    current_thresholds = list(net.threshold) if hasattr(net, 'threshold') else [0.5] * num_exits
+                    current_utils = np.zeros(num_exits + 1)
+                    current_utils[-1] = 1.0
+                    current_avg_macs = threshold_to_macs(candidate_thresholds=current_thresholds, initialized_thresholds=initialized_thresholds)
+                    return current_thresholds, self.info.get('top1', 0), current_avg_macs, current_utils
 
+            print(f"results {results}")
+            print(f"candidates {candidates}")
+            print(f"threshold_values {threshold_values}")
+            print(f"checked_thresholds {checked_thresholds}")
             best = max(results, key=lambda x: x[0])
             best_score,best_thresholds, best_acc, best_avg_macs, best_macs_list, best_utils=best
             
@@ -980,57 +1053,65 @@ validation_conf_data=None
 
 def evaluate_thresholds(args):
                 global validation_conf_data
-                thresholds, num_exits, initialized_thresholds,  macs_list  ,target_macs, alpha_macs =args
-                utils = np.zeros(num_exits+1)  # to store utils for each exit
-                total_samples = 0
-                correct_with_thresholds = 0
-                norm_avg_macs = 0
+                try:
+                    if validation_conf_data is None or len(validation_conf_data) == 0:
+                        raise RuntimeError("validation_conf_data is None or empty in worker process")
+                    
+                    thresholds, num_exits, initialized_thresholds, macs_list, target_macs, alpha_macs = args
+                    utils = np.zeros(num_exits+1)  # to store utils for each exit
+                    total_samples = 0
+                    correct_with_thresholds = 0
+                    norm_avg_macs = 0
 
-                for label, conf_pred_list in validation_conf_data:
-                    disabled_exit=0
-                    exited=False
-                    total_samples+=1
-                    for exit_id in range(num_exits):
-                        if initialized_thresholds[exit_id] == 1:
-                            disabled_exit += 1
-                            continue
-                        conf, pred = conf_pred_list[exit_id-disabled_exit]
-                        if conf >= thresholds[exit_id]:
-                            utils[exit_id] += 1
-                            exited = True
+                    for label, conf_pred_list in validation_conf_data:
+                        disabled_exit=0
+                        exited=False
+                        total_samples+=1
+                        for exit_id in range(num_exits):
+                            if initialized_thresholds[exit_id] == 1:
+                                disabled_exit += 1
+                                continue
+                            conf, pred = conf_pred_list[exit_id-disabled_exit]
+                            if conf >= thresholds[exit_id]:
+                                utils[exit_id] += 1
+                                exited = True
+                                if pred == label:
+                                    correct_with_thresholds += 1
+                                break
+                        if not exited:
+                            # Go to final exit
+                            utils[-1] += 1
+                            conf, pred = conf_pred_list[-1]
                             if pred == label:
                                 correct_with_thresholds += 1
-                            break
-                    if not exited:
-                        # Go to final exit
-                        utils[-1] += 1
-                        conf, pred = conf_pred_list[-1]
-                        if pred == label:
-                            correct_with_thresholds += 1
 
-                utils = utils / total_samples 
-                avg_macs=0
-                disabled_exit = 0
-                for i in range(len(utils)):
-                    if i < len(initialized_thresholds):
-                        if initialized_thresholds[i] == 1:  # if the threshold is 1.0, skip this exit
-                            disabled_exit+=1
-                            continue
-                        if thresholds[i] == 1:
-                            disabled_exit+=1
-                            continue
-                    avg_macs+= macs_list[i-disabled_exit] * utils[i]
+                    utils = utils / total_samples 
+                    avg_macs=0
+                    disabled_exit = 0
+                    for i in range(len(utils)):
+                        if i < len(initialized_thresholds):
+                            if initialized_thresholds[i] == 1:  # if the threshold is 1.0, skip this exit
+                                disabled_exit+=1
+                                continue
+                            if thresholds[i] == 1:
+                                disabled_exit+=1
+                                continue
+                        avg_macs+= macs_list[i-disabled_exit] * utils[i]
 
+                    desired_macs=target_macs
+                    MAEP_error = ((avg_macs - desired_macs)/ desired_macs)  
+                    norm_avg_macs= np.absolute(MAEP_error)
 
-                desired_macs=target_macs
-                MAEP_error = ((avg_macs - desired_macs)/ desired_macs)  
-                norm_avg_macs= np.absolute(MAEP_error)
+                    acc = 100.0 * correct_with_thresholds / total_samples
+                    utils = utils * 100  # calculate utils for each exit
+                    lamda = 0.1
+                    
+                    score = acc - lamda * (norm_avg_macs*100)  # example: penalize higher normalized macs
 
-
-                acc = 100.0 * correct_with_thresholds / total_samples
-                utils = utils * 100  # calculate utils for each exit
-                lamda = 0.1
-                
-                score = acc - lamda * (norm_avg_macs*100)  # example: penalize higher normalized macs
-
-                return score,thresholds, acc, avg_macs, macs_list, utils
+                    return score, thresholds, acc, avg_macs, macs_list, utils
+                    
+                except Exception as e:
+                    import traceback
+                    error_msg = f"Error in evaluate_thresholds: {str(e)}\n{traceback.format_exc()}"
+                    print(error_msg, flush=True)
+                    raise
