@@ -130,9 +130,15 @@ class MSuNAS:
                 f.write(f"0,{len(archive)},{hv:.4f},NaN,NaN,NaN,NaN,NaN,NaN\n")
                       
         # reference point (nadir point) for calculating hypervolume
-        ref_pt = np.array([np.max([x[1] for x in archive]), np.max([np.dot(x[2], x[3]) for x in archive])])
+        F = np.column_stack(([x[1] for x in archive], [np.dot(x[2], x[3]) for x in archive]))
+        ref_pt = np.array([np.max(F[:, 0]), np.max(F[:, 1])])
         
-        
+        if self.resume:
+            hv = self._calc_hv(ref_pt, F)
+            with open(self.history_file, "a") as f:
+                f.write(f"{it_start},{len(archive)},{hv:.4f},NaN,NaN,NaN,NaN,NaN,NaN\n")
+            it_start += 1 # start search from the next iteration
+            
         # main loop of the search
         for it in range(it_start, it_start + self.iterations + 1):
             print("fit predictors")
