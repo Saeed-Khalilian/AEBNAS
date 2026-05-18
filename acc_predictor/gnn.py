@@ -6,37 +6,6 @@ import torch.nn as nn
 import copy
 from utils import get_correlation
 
-class Net(nn.Module):
-    # N-layer MLP
-    def __init__(self, n_feature, n_layers=2, n_hidden=300, n_output=1, drop=0.2):
-        super(Net, self).__init__()
-
-        self.stem = nn.Sequential(nn.Linear(n_feature, n_hidden), nn.ReLU())
-
-        hidden_layers = []
-        for _ in range(n_layers):
-            hidden_layers.append(nn.Linear(n_hidden, n_hidden))
-            hidden_layers.append(nn.ReLU())
-        self.hidden = nn.Sequential(*hidden_layers)
-
-        self.regressor = nn.Linear(n_hidden, n_output)  # output layer
-        self.drop = nn.Dropout(p=drop)
-
-    def forward(self, x):
-        x = self.stem(x)
-        x = self.hidden(x)
-        x = self.drop(x)
-        x = self.regressor(x)  # linear output
-        return x
-
-    @staticmethod
-    def init_weights(m):
-        if type(m) == nn.Linear:
-            n = m.in_features
-            y = 1.0 / np.sqrt(n)
-            m.weight.data.uniform_(-y, y)
-            m.bias.data.fill_(0)
-
 class GNN_Surrogate(nn.Module):
     def __init__(self, num_node_features=18, hidden_dim=100, output_dimension=100):
         super(GNN_Surrogate, self).__init__()
@@ -57,8 +26,18 @@ class GNN_Surrogate(nn.Module):
         self.readout = nn.Linear(hidden_dim, output_dimension)
         # Concatenate pooled GIN representation with input resolution scalar.
         predictor_input_dim = output_dimension + 1
-        self.accuracy_predictor = Net(predictor_input_dim)
-        self.complexity_predictor = Net(predictor_input_dim)
+        
+        self.accuracy_predictor = nn.Sequential(
+            nn.Linear(predictor_input_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1)
+        )
+        
+        self.complexity_predictor = nn.Sequential(
+            nn.Linear(predictor_input_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1)
+        )
 
     def forward(self, x, edge_index, batch, input_resolution):
         """Assumes that hte input resolution is normalized to [0,1]"""
