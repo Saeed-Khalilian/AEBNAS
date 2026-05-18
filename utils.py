@@ -173,8 +173,10 @@ def prepare_eval_folder(path, configs, gpu=2, n_gpus=8, **kwargs):
     print("#####################################", kwargs )
     
     os.makedirs(path, exist_ok=True)
+    num_physical_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 1
     gpu_template = ','.join(['{}'] * gpu)
-    gpus = [gpu_template.format(i, i + 1) for i in range(0, n_gpus, gpu)]
+    # Use modulo to reuse physical GPUs
+    gpus = [gpu_template.format(*( (i + k) % num_physical_gpus for k in range(gpu) )) for i in range(0, n_gpus, gpu)]
     bash_file = ['#!/bin/bash']
     sample = 0
     for i in range(0, len(configs), n_gpus//gpu):
