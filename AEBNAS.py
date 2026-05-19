@@ -3,6 +3,7 @@ import json
 import shutil
 import argparse
 import subprocess
+import traceback
 import numpy as np
 import datetime
 
@@ -162,14 +163,12 @@ class MSuNAS:
                   candidates[i]['t'] = thresholds[i]
 
             
-            print("completed evaluation")
             # check for accuracy predictor's performance
             rmse, rho, tau = get_correlation(
                 np.concatenate((a_top1_err_pred, c_top1_err_pred)),
                 np.array([x[1] for x in archive] + c_top1_err))
             print("checked accuracy predictors performance")
 
-            print("completed evaluation")
             # check for complexity predictor's performance
             rmse_c, rho_c, tau_c = get_correlation(
                 np.concatenate((a_compl_err_pred, c_compl_err_pred)),
@@ -282,10 +281,19 @@ class MSuNAS:
             n_epochs=self.n_epochs, test=self.test, latency=self.latency, verbose=False,
             pmax = self.pmax, fmax = self.fmax, amax = self.amax, wp = self.wp, wf = self.wf, wa = self.wa, penalty = self.penalty, threshold ='\"'+str(self.threshold)+'\"', target_macs= self.target_macs, alpha_macs = self.alpha_macs)
 
-        #this is not working
-        print("call subprocess")
-        print(gen_dir)
-        subprocess.call("sh {}/run_bash.sh".format(gen_dir), shell=True)
+        print(f"Evaluating {len(archs)} candidates in {gen_dir}")
+        bash_log = os.path.join(gen_dir, "run_bash.log")
+        proc = subprocess.run(
+            "sh {}/run_bash.sh".format(gen_dir), shell=True,
+            capture_output=True, text=True)
+        with open(bash_log, "w", encoding="utf-8") as f:
+            f.write("=== STDOUT ===\n")
+            f.write(proc.stdout or "")
+            f.write("\n=== STDERR ===\n")
+            f.write(proc.stderr or "")
+
+        if proc.returncode != 0:
+            print(f"WARNING: run_bash.sh returned {proc.returncode}. See {bash_log}")
 
         top1_err, complexity, util = [], [], []
         new_threshodls = []
@@ -296,11 +304,28 @@ class MSuNAS:
             except FileNotFoundError:
                 # just in case the subprocess evaluation failed
                 stats = {'top1': 0, self.sec_obj: [10**15], 'util': [1.0]}  # makes the solution artificially bad so it won't survive
-                # store this architecture to a separate in case we want to revisit after the search
-                os.makedirs(os.path.join(self.save_path, "failed"), exist_ok=True)
-                shutil.copy(os.path.join(gen_dir, "net_{}.subnet".format(i)),
-                            os.path.join(self.save_path, "failed", "it_{}_net_{}".format(it, i)))
-            
+                failed_dir = os.path.join(self.save_path, "failed")
+                os.makedirs(failed_dir, exist_ok=True)
+                subnet_src = os.path.join(gen_dir, "net_{}.subnet".format(i))
+                subnet_dst = os.path.join(failed_dir, "it_{}_net_{}.subnet".format(it, i))
+                if os.path.exists(subnet_src):
+                    shutil.copy(subnet_src, subnet_dst)
+
+                err_path = os.path.join(failed_dir, f"it_{it}_net_{i}.error")
+                with open(err_path, "w", encoding="utf-8") as err_file:
+                    err_file.write(f"FAILED EVALUATION: iteration={it}, candidate={i}\n")
+                    err_file.write(f"Expected stats path: {os.path.join(gen_dir, 'net_{}.stats'.format(i))}\n")
+                    err_file.write(f"Subnetwork path: {subnet_src}\n")
+                    err_file.write(f"Subprocess returncode: {proc.returncode}\n")
+                    err_file.write(f"Bash log path: {bash_log}\n")
+                    err_file.write("\n=== STDERR ===\n")
+                    err_file.write(proc.stderr or "")
+                    err_file.write("\n=== STDOUT ===\n")
+                    err_file.write(proc.stdout or "")
+                    err_file.write("\n=== TRACEBACK ===\n")
+                    err_file.write(traceback.format_exc())
+                print(f"WARNING: failed candidate iteration={it}, net={i}; see {err_path}")
+
             top1_err.append(100 - stats['top1'])
             complexity.append(stats[self.sec_obj])
             util.append(stats["util"])

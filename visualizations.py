@@ -57,6 +57,34 @@ def _plot_column_into_axes(df, axes_col, x_col, x_label, column_title=None):
     ax4.grid(True, linestyle='--', alpha=0.7)
     ax4.set_title('Complexity: Rank Correlation')
 
+def extract_dataset_name(file_path):
+    """Extract dataset name from file path.
+    
+    Expects paths like: ./plots/cifar10/gin/gin.csv
+    Returns the dataset name (e.g., 'cifar10')
+    """
+    # Normalize path separators to forward slashes for consistency
+    normalized_path = file_path.replace('\\', '/')
+    path_parts = normalized_path.split('/')
+    
+    # Find 'plots' in the path and get the next part as dataset name
+    if 'plots' in path_parts:
+        plots_idx = path_parts.index('plots')
+        if plots_idx + 1 < len(path_parts):
+            return path_parts[plots_idx + 1]
+    
+    raise ValueError(f"Could not extract dataset name from path: {file_path}")
+
+def validate_same_dataset(csv_paths):
+    """Ensure all files are from the same dataset."""
+    datasets = [extract_dataset_name(path) for path in csv_paths]
+    if len(set(datasets)) > 1:
+        raise ValueError(
+            f"All input files must be from the same dataset. "
+            f"Found datasets: {set(datasets)}"
+        )
+    return datasets[0]
+
 def plot_history(csv_paths):
     # Accept either a single path string or a list of paths
     if isinstance(csv_paths, str):
@@ -89,8 +117,24 @@ def plot_history(csv_paths):
         plt.close(fig)
         return
 
-    # Multiple files: create comparison figures with columns per file
-    output_dir = os.path.dirname(csv_paths[0]) or '.'
+    # Multiple files: validate same dataset and create comparison figures
+    dataset_name = validate_same_dataset(csv_paths)
+    
+    # Determine output directory: dataset_folder/comparison
+    # Get the plots folder path from the first file
+    first_file_dir = os.path.dirname(csv_paths[0])
+    plots_dir = first_file_dir
+    # Navigate up to the dataset folder (plots/dataset_name)
+    while plots_dir and os.path.basename(plots_dir) != dataset_name:
+        plots_dir = os.path.dirname(plots_dir)
+    
+    if not plots_dir or os.path.basename(plots_dir) != dataset_name:
+        raise ValueError(f"Could not find dataset folder for dataset: {dataset_name}")
+    
+    output_dir = os.path.join(plots_dir, 'comparison')
+    os.makedirs(output_dir, exist_ok=True)
+    print(f"Comparison folder created/verified at: {output_dir}")
+    
     plt.style.use('seaborn-v0_8-muted')
 
     for x_col, x_label, out_name in [

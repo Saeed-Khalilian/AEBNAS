@@ -170,8 +170,6 @@ def bash_command_template(sample = 0, **kwargs):
 def prepare_eval_folder(path, configs, gpu=2, n_gpus=8, **kwargs):
     """ create a folder for parallel evaluation of a population of architectures """
     
-    print("#####################################", kwargs )
-    
     os.makedirs(path, exist_ok=True)
     num_physical_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 1
     gpu_template = ','.join(['{}'] * gpu)
