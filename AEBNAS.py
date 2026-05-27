@@ -42,7 +42,7 @@ class MSuNAS:
         # Initialize history file
         self.history_file = os.path.join(self.save_path, "history.csv")
         with open(self.history_file, "w") as f:
-            f.write("iteration,n_samples,hv,acc_rmse,acc_rho,acc_tau,compl_rmse,compl_rho,compl_tau\n")
+            f.write("iteration,n_samples,hv,acc_rmse,acc_rho,acc_tau,compl_rmse,compl_rho,compl_tau,acc_rho_trn,acc_rho_tst,acc_tau_trn,acc_tau_tst,compl_rho_trn,compl_rho_tst,compl_tau_trn,compl_tau_tst\n")
 
         self.sec_obj = kwargs.pop('sec_obj', 'flops')  # second objective to optimize simultaneously
         self.iterations = kwargs.pop('iterations', 30)  # number of iterations to run search
@@ -128,7 +128,7 @@ class MSuNAS:
             ref_pt = np.array([np.max(F[:, 0]), np.max(F[:, 1])])
             hv = self._calc_hv(ref_pt, F)
             with open(self.history_file, "a") as f:
-                f.write(f"0,{len(archive)},{hv:.4f},NaN,NaN,NaN,NaN,NaN,NaN\n")
+                f.write(f"0,{len(archive)},{hv:.4f},NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN\n")
                       
         # reference point (nadir point) for calculating hypervolume
         F = np.column_stack(([x[1] for x in archive], [np.dot(x[2], x[3]) for x in archive]))
@@ -137,7 +137,7 @@ class MSuNAS:
         if self.resume:
             hv = self._calc_hv(ref_pt, F)
             with open(self.history_file, "a") as f:
-                f.write(f"{it_start},{len(archive)},{hv:.4f},NaN,NaN,NaN,NaN,NaN,NaN\n")
+                f.write(f"{it_start},{len(archive)},{hv:.4f},NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN\n")
             it_start += 1 # start search from the next iteration
             
         # main loop of the search
@@ -152,6 +152,7 @@ class MSuNAS:
             else:   
                 acc_predictor, a_top1_err_pred = self._fit_acc_predictor(archive)
                 compl_predictor = None
+                a_compl_err_pred = None
                 if self.sec_predictor is not None:
                     compl_predictor, a_compl_err_pred = self._fit_compl_predictor(archive)
                 print("starting next")
@@ -164,15 +165,39 @@ class MSuNAS:
 
             
             # check for accuracy predictor's performance
+            true_acc_trn = np.array([x[1] for x in archive])
+            true_acc_tst = np.array(c_top1_err)
+            pred_acc_trn = np.array(a_top1_err_pred).flatten()
+            pred_acc_tst = np.array(c_top1_err_pred).flatten()
+
             rmse, rho, tau = get_correlation(
-                np.concatenate((a_top1_err_pred, c_top1_err_pred)),
-                np.array([x[1] for x in archive] + c_top1_err))
+                np.concatenate((pred_acc_trn, pred_acc_tst)),
+                np.concatenate((true_acc_trn, true_acc_tst)))
+            
+            _, acc_rho_trn, acc_tau_trn = get_correlation(pred_acc_trn, true_acc_trn)
+            _, acc_rho_tst, acc_tau_tst = get_correlation(pred_acc_tst, true_acc_tst)
+            
             print("checked accuracy predictors performance")
 
             # check for complexity predictor's performance
-            rmse_c, rho_c, tau_c = get_correlation(
-                np.concatenate((a_compl_err_pred, c_compl_err_pred)),
-                np.array([np.dot(x[2], x[3]) for x in archive] + [np.dot(c, u) for c, u in zip(complexity, util)]))
+            true_comp_trn = np.array([np.dot(x[2], x[3]) for x in archive])
+            true_comp_tst = np.array([np.dot(c, u) for c, u in zip(complexity, util)])
+            
+            if a_compl_err_pred is not None and c_compl_err_pred is not None:
+                pred_comp_trn = np.array(a_compl_err_pred).flatten()
+                pred_comp_tst = np.array(c_compl_err_pred).flatten()
+
+                rmse_c, rho_c, tau_c = get_correlation(
+                    np.concatenate((pred_comp_trn, pred_comp_tst)),
+                    np.concatenate((true_comp_trn, true_comp_tst)))
+                
+                _, compl_rho_trn, compl_tau_trn = get_correlation(pred_comp_trn, true_comp_trn)
+                _, compl_rho_tst, compl_tau_tst = get_correlation(pred_comp_tst, true_comp_tst)
+            else:
+                rmse_c, rho_c, tau_c = np.nan, np.nan, np.nan
+                compl_rho_trn, compl_tau_trn = np.nan, np.nan
+                compl_rho_tst, compl_tau_tst = np.nan, np.nan
+
             print("checked complexity predictors performance")
           
             for member in zip(candidates, c_top1_err, complexity, util):
@@ -208,13 +233,16 @@ class MSuNAS:
             # Log to history.csv
             n_samples = len(archive)
             acc_metrics = f"{rmse:.4f},{rho:.4f},{tau:.4f}"
+            acc_extra_metrics = f"{acc_rho_trn:.4f},{acc_rho_tst:.4f},{acc_tau_trn:.4f},{acc_tau_tst:.4f}"
             if self.predictor in self.combined_predictors or self.sec_predictor is not None:
                 compl_metrics = f"{rmse_c:.4f},{rho_c:.4f},{tau_c:.4f}"
+                compl_extra_metrics = f"{compl_rho_trn:.4f},{compl_rho_tst:.4f},{compl_tau_trn:.4f},{compl_tau_tst:.4f}"
             else:
                 compl_metrics = "NaN,NaN,NaN"
+                compl_extra_metrics = "NaN,NaN,NaN,NaN"
             
             with open(self.history_file, "a") as f:
-                f.write(f"{it},{n_samples},{hv:.4f},{acc_metrics},{compl_metrics}\n")
+                f.write(f"{it},{n_samples},{hv:.4f},{acc_metrics},{compl_metrics},{acc_extra_metrics},{compl_extra_metrics}\n")
             
 
             print("iteration complete")

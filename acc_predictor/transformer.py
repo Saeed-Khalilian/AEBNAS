@@ -133,11 +133,10 @@ def train(net, sequences, input_resolutions, padding_masks, targets, trn_split=0
     target_mean = targets[trn_idx].mean(dim=0)
     target_std = targets[trn_idx].std(dim=0) + 1e-8
 
-    targets_scaled = targets.clone()
-    targets_scaled[trn_idx] = (targets[trn_idx] - target_mean) / target_std
+    targets_scaled = (targets - target_mean) / target_std
 
     trn_data = TensorDataset(sequences[trn_idx], input_resolutions[trn_idx], padding_masks[trn_idx], targets_scaled[trn_idx])
-    vld_data = TensorDataset(sequences[vld_idx], input_resolutions[vld_idx], padding_masks[vld_idx], targets[vld_idx])
+    vld_data = TensorDataset(sequences[vld_idx], input_resolutions[vld_idx], padding_masks[vld_idx], targets_scaled[vld_idx])
 
     trn_loader = DataLoader(trn_data, batch_size=min(16, len(trn_data)), shuffle=True)
     vld_loader = DataLoader(vld_data, batch_size=min(16, len(vld_data)), shuffle=False)
@@ -156,7 +155,7 @@ def train(net, sequences, input_resolutions, padding_masks, targets, trn_split=0
         best_loss = 1e33
         for epoch in range(epochs):
             loss_trn = train_one_epoch(net, trn_loader, criterion, optimizer, device)
-            loss_vld = infer(net, vld_loader, criterion, device, target_mean, target_std)
+            loss_vld = infer(net, vld_loader, criterion, device)
             scheduler.step()
 
             if loss_vld < best_loss:
@@ -191,7 +190,7 @@ def train_one_epoch(net, loader, criterion, optimizer, device):
     return running_loss / max(n_batches, 1)
 
 
-def infer(net, loader, criterion, device, target_mean, target_std):
+def infer(net, loader, criterion, device):
     net.eval()
     running_loss = 0.0
     n_batches = 0
@@ -201,12 +200,9 @@ def infer(net, loader, criterion, device, target_mean, target_std):
             batch = [item.to(device) for item in batch]
             seq, resolution, mask, target = batch
             pred_acc, pred_complex = net(seq, resolution, src_key_padding_mask=mask)
-            scaled_pred = torch.cat((pred_acc, pred_complex), dim=1)
+            pred = torch.cat((pred_acc, pred_complex), dim=1)
             
-            unscaled_pred = scaled_pred * target_std.to(device) + target_mean.to(device)
-            unscaled_target = target.view_as(unscaled_pred)
-            
-            loss = criterion(unscaled_pred, unscaled_target)
+            loss = criterion(pred, target.view_as(pred))
             running_loss += loss.item()
             n_batches += 1
 
@@ -225,7 +221,7 @@ def validate(net, loader, device, target_mean, target_std):
             scaled_pred = torch.cat((pred_acc, pred_complex), dim=1)
             
             unscaled_pred = scaled_pred * target_std.to(device) + target_mean.to(device)
-            unscaled_target = target.view_as(unscaled_pred)
+            unscaled_target = target.view_as(unscaled_pred) * target_std.to(device) + target_mean.to(device)
             
             pred_list.append(unscaled_pred.cpu())
             target_list.append(unscaled_target.cpu())
@@ -233,9 +229,10 @@ def validate(net, loader, device, target_mean, target_std):
         pred = torch.cat(pred_list, dim=0).detach().numpy()
         target = torch.cat(target_list, dim=0).detach().numpy()
 
-        rmse, rho, tau = get_correlation(pred, target)
+        rmse_acc, rho_acc, tau_acc = get_correlation(pred[:, 0], target[:, 0])
+        rmse_comp, rho_comp, tau_comp = get_correlation(pred[:, 1], target[:, 1])
 
-    return rmse, rho, tau, pred, target
+    return rmse_acc, rho_acc, tau_acc, pred, target
 
 
 def predict(net, sequences, input_resolutions, padding_masks, device):

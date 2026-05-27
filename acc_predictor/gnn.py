@@ -98,7 +98,7 @@ def train(net, graph_data, trn_split=0.8, pretrained=None, device='cpu',
     target_mean = all_targets[trn_idx].mean(dim=0)
     target_std = all_targets[trn_idx].std(dim=0) + 1e-8
 
-    for i in trn_idx.tolist():
+    for i in range(n_samples):
         graph_data[i].y = (graph_data[i].y - target_mean) / target_std
 
     trn_data = [graph_data[i] for i in trn_idx.tolist()]
@@ -129,7 +129,7 @@ def train(net, graph_data, trn_split=0.8, pretrained=None, device='cpu',
         best_loss = 1e33
         for epoch in range(epochs):
             loss_trn = train_one_epoch(net, trn_loader, criterion, optimizer, device)
-            loss_vld = infer(net, vld_loader, criterion, device, target_mean, target_std)
+            loss_vld = infer(net, vld_loader, criterion, device)
             scheduler.step()
             #print("loop")
             # if epoch % 500 == 0 and verbose:
@@ -164,7 +164,7 @@ def train_one_epoch(net, loader, criterion, optimizer, device):
 
     return running_loss / max(n_batches, 1)
 
-def infer(net, loader, criterion, device, target_mean, target_std):
+def infer(net, loader, criterion, device):
     net.eval()
     running_loss = 0.0
     n_batches = 0
@@ -173,12 +173,9 @@ def infer(net, loader, criterion, device, target_mean, target_std):
         for batch in loader:
             batch = batch.to(device)
             pred_acc, pred_complex = net(batch.x, batch.edge_index, batch.batch, batch.input_resolution)
-            scaled_pred = torch.cat((pred_acc, pred_complex), dim=1)
+            pred = torch.cat((pred_acc, pred_complex), dim=1)
             
-            unscaled_pred = scaled_pred * target_std.to(device) + target_mean.to(device)
-            unscaled_target = batch.y.view_as(unscaled_pred)
-            
-            loss = criterion(unscaled_pred, unscaled_target)
+            loss = criterion(pred, batch.y.view_as(pred))
             running_loss += loss.item()
             n_batches += 1
 
@@ -195,7 +192,7 @@ def validate(net, loader, device, target_mean, target_std):
             scaled_pred = torch.cat((pred_acc, pred_complex), dim=1)
             
             unscaled_pred = scaled_pred * target_std.to(device) + target_mean.to(device)
-            unscaled_target = batch.y.view_as(unscaled_pred)
+            unscaled_target = batch.y.view_as(unscaled_pred) * target_std.to(device) + target_mean.to(device)
             
             pred_list.append(unscaled_pred.cpu())
             target_list.append(unscaled_target.cpu())
@@ -203,10 +200,11 @@ def validate(net, loader, device, target_mean, target_std):
         pred = torch.cat(pred_list, dim=0).detach().numpy()
         target = torch.cat(target_list, dim=0).detach().numpy()
 
-        rmse, rho, tau = get_correlation(pred, target)
+        rmse_acc, rho_acc, tau_acc = get_correlation(pred[:, 0], target[:, 0])
+        rmse_comp, rho_comp, tau_comp = get_correlation(pred[:, 1], target[:, 1])
 
-    # print("Validation RMSE = {:.4f}, Spearman's Rho = {:.4f}, Kendall’s Tau = {:.4f}".format(rmse, rho, tau))
-    return rmse, rho, tau, pred, target
+    # print("Validation RMSE = {:.4f}, Spearman's Rho = {:.4f}, Kendall’s Tau = {:.4f}".format(rmse_acc, rho_acc, tau_acc))
+    return rmse_acc, rho_acc, tau_acc, pred, target
 
 def predict(net, query, device):
     if len(query) == 0:
