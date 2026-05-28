@@ -7,34 +7,48 @@ import copy
 from utils import get_correlation
 
 class GNN_Surrogate(nn.Module):
-    def __init__(self, num_node_features=18, hidden_dim=100, output_dimension=100):
+    def __init__(self, num_node_features=18, hidden_dim=32, output_dimension=32):
         super(GNN_Surrogate, self).__init__()
         self.mlp1 = nn.Sequential(
                 nn.Linear(num_node_features, hidden_dim),
+                nn.BatchNorm1d(hidden_dim),
                 nn.ReLU(),
                 nn.Linear(hidden_dim, hidden_dim),
+                nn.BatchNorm1d(hidden_dim),
                 nn.ReLU())
         self.conv1 = GINConv(self.mlp1)
+        self.bn1 = nn.BatchNorm1d(hidden_dim)
 
         self.mlp2 = nn.Sequential(
                 nn.Linear(hidden_dim, hidden_dim),
+                nn.BatchNorm1d(hidden_dim),
                 nn.ReLU(),
                 nn.Linear(hidden_dim, hidden_dim),
+                nn.BatchNorm1d(hidden_dim),
                 nn.ReLU())
         self.conv2 = GINConv(self.mlp2)
+        self.bn2 = nn.BatchNorm1d(hidden_dim)
 
-        self.readout = nn.Linear(hidden_dim, output_dimension)
+        self.readout = nn.Sequential(
+            nn.Linear(hidden_dim, output_dimension),
+            nn.BatchNorm1d(output_dimension),
+            nn.ReLU()
+        )
         # Concatenate pooled GIN representation with input resolution scalar.
         predictor_input_dim = output_dimension + 1
         
+        self.dropout = nn.Dropout(p=0.1)
+        
         self.accuracy_predictor = nn.Sequential(
             nn.Linear(predictor_input_dim, 64),
+            nn.BatchNorm1d(64),
             nn.ReLU(),
             nn.Linear(64, 1)
         )
         
         self.complexity_predictor = nn.Sequential(
             nn.Linear(predictor_input_dim, 64),
+            nn.BatchNorm1d(64),
             nn.ReLU(),
             nn.Linear(64, 1)
         )
@@ -42,7 +56,9 @@ class GNN_Surrogate(nn.Module):
     def forward(self, x, edge_index, batch, input_resolution):
         """Assumes that hte input resolution is normalized to [0,1]"""
         x = self.conv1(x=x, edge_index=edge_index)
+        x = self.bn1(x)
         x = self.conv2(x=x, edge_index=edge_index)
+        x = self.bn2(x)
         x = global_add_pool(x, batch)
         x = self.readout(x)
 
@@ -50,6 +66,8 @@ class GNN_Surrogate(nn.Module):
             input_resolution = input_resolution.unsqueeze(1)
 
         x = torch.cat((x, input_resolution), dim=1)
+        x = self.dropout(x)
+        
         predicted_accuracy = self.accuracy_predictor(x)
         predicted_complexity = self.complexity_predictor(x)
         return predicted_accuracy, predicted_complexity
@@ -80,7 +98,7 @@ class GIN:
 
 
 def train(net, graph_data, trn_split=0.8, pretrained=None, device='cpu',
-          lr=3e-4, epochs=500, verbose=False):
+          lr=5e-3, epochs=300, verbose=False):
     n_samples = len(graph_data)
     if n_samples == 0:
         raise ValueError("Training set is empty")
@@ -120,7 +138,7 @@ def train(net, graph_data, trn_split=0.8, pretrained=None, device='cpu',
         # initialize the weights
         # net.apply(Net.init_weights)
         net = net.to(device)
-        optimizer = torch.optim.Adam(net.parameters(), lr=lr)
+        optimizer = torch.optim.Adam(net.parameters(), lr=lr, weight_decay=1e-4)
         criterion = nn.SmoothL1Loss()
         # criterion = nn.MSELoss()
 
