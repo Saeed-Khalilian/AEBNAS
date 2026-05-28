@@ -105,6 +105,7 @@ def spearmanr_numpy(x, y):
     return rho
 
 def get_correlation(prediction, target):
+    assert prediction.ndim == 1 and target.ndim == 1, f"Expected 1D arrays, got {prediction.shape} and {target.shape}"
     import scipy.stats as stats
     rmse = np.sqrt(((prediction - target) ** 2).mean())
     rho, _ = stats.spearmanr(prediction, target)

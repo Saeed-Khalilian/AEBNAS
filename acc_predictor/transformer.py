@@ -19,7 +19,7 @@ class TransformerSurrogate(nn.Module):
         self.cls_token = nn.Parameter(torch.zeros(1, 1, d_model))
         
         #Positional Encoding Learned
-        self.pos_embedding = nn.Parameter(torch.zeros(1, max_seq_len, d_model))
+        self.pos_embedding = nn.Parameter(torch.zeros(1, max_seq_len + 1, d_model))
         
         #transformer Encoder
         encoder_layer = nn.TransformerEncoderLayer(
@@ -32,17 +32,26 @@ class TransformerSurrogate(nn.Module):
         )
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         
-        
+        # LayerNorm on CLS output before heads (ViT-style)
+        self.cls_norm = nn.LayerNorm(d_model)
+        self.dropout = nn.Dropout(p=dropout)
+
         # input_dim + 1 because we concatenate Input Resolution
+        predictor_input_dim = d_model + 1  # +1 for resolution scalar
+
         self.mlp_accuracy = nn.Sequential(
-            nn.Linear(d_model + 1, 64),
+            nn.Linear(predictor_input_dim, 64),
+            nn.LayerNorm(64),
             nn.ReLU(),
+            nn.Dropout(p=dropout),
             nn.Linear(64, 1)
         )
         
         self.mlp_macs = nn.Sequential(
-            nn.Linear(d_model + 1, 64),
+            nn.Linear(predictor_input_dim, 64),
+            nn.LayerNorm(64),
             nn.ReLU(),
+            nn.Dropout(p=dropout),
             nn.Linear(64, 1)
         )
 
@@ -76,6 +85,8 @@ class TransformerSurrogate(nn.Module):
         
         # Extract [CLS] representation
         cls_out = features[:, 0, :] # (batch_size, d_model)
+        cls_out = self.cls_norm(cls_out)
+        cls_out = self.dropout(cls_out)
         
         # Concatenate resolution
         combined = torch.cat([cls_out, resolution], dim=1) # (batch_size, d_model + 1)
@@ -116,7 +127,7 @@ class Transformer:
 
 
 def train(net, sequences, input_resolutions, padding_masks, targets, trn_split=0.8, pretrained=None, device='cpu',
-          lr=3e-4, epochs=500, verbose=False):
+          lr=1e-3, epochs=300, verbose=False):
     n_samples = len(sequences)
     if n_samples == 0:
         raise ValueError("Training set is empty")
@@ -148,15 +159,25 @@ def train(net, sequences, input_resolutions, padding_masks, targets, trn_split=0
         best_net = copy.deepcopy(net)
     else:
         net = net.to(device)
-        optimizer = torch.optim.Adam(net.parameters(), lr=lr)
+        optimizer = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=1e-2)
         criterion = nn.SmoothL1Loss()
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, int(epochs), eta_min=0)
+        # Warmup for first 10% epochs, then cosine decay
+        warmup_epochs = epochs // 10
+        def lr_lambda(epoch):
+            if epoch < warmup_epochs:
+                return (epoch + 1) / warmup_epochs
+            return 1.0
+        warmup_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs - warmup_epochs, eta_min=1e-5)
 
         best_loss = 1e33
         for epoch in range(epochs):
             loss_trn = train_one_epoch(net, trn_loader, criterion, optimizer, device)
             loss_vld = infer(net, vld_loader, criterion, device)
-            scheduler.step()
+            if epoch < warmup_epochs:
+                warmup_scheduler.step()
+            else:
+                scheduler.step()
 
             if loss_vld < best_loss:
                 best_loss = loss_vld
