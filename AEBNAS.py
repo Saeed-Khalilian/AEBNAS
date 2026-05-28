@@ -123,7 +123,8 @@ class MSuNAS:
                 archive.append(member)
             
             # Log initial state (DOE)
-            F = np.column_stack(([x[1] for x in archive], [np.dot(x[2], x[3]) for x in archive]))
+            maep_errors = [np.absolute((np.dot(x[2], x[3]) - self.target_macs) / self.target_macs) * 100 for x in archive]
+            F = np.column_stack(([x[1] for x in archive], maep_errors))
             # reference point (nadir point) for calculating hypervolume
             ref_pt = np.array([np.max(F[:, 0]), np.max(F[:, 1])])
             hv = self._calc_hv(ref_pt, F)
@@ -131,7 +132,8 @@ class MSuNAS:
                 f.write(f"0,{len(archive)},{hv:.4f},NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN\n")
                       
         # reference point (nadir point) for calculating hypervolume
-        F = np.column_stack(([x[1] for x in archive], [np.dot(x[2], x[3]) for x in archive]))
+        maep_errors = [np.absolute((np.dot(x[2], x[3]) - self.target_macs) / self.target_macs) * 100 for x in archive]
+        F = np.column_stack(([x[1] for x in archive], maep_errors))
         ref_pt = np.array([np.max(F[:, 0]), np.max(F[:, 1])])
         
         if self.resume:
@@ -204,9 +206,8 @@ class MSuNAS:
                 archive.append(member)
             print("Added to archive")
             
-             
-        
-            F = np.column_stack(([x[1] for x in archive], [np.dot(x[2], x[3]) for x in archive]))
+            maep_errors = [np.absolute((np.dot(x[2], x[3]) - self.target_macs) / self.target_macs) * 100 for x in archive]
+            F = np.column_stack(([x[1] for x in archive], maep_errors))
             
             hv = self._calc_hv(ref_pt, F)
             print("Calculated hyper volume")
@@ -409,7 +410,8 @@ class MSuNAS:
     def _next(self, archive, acc_predictor, compl_predictor, K):
         """ searching for next K candidate for high-fidelity evaluation (lower level) """
 
-        F = np.column_stack(([x[1] for x in archive], [np.dot(x[2], x[3]) for x in archive]))
+        maep_errors = [np.absolute((np.dot(x[2], x[3]) - self.target_macs) / self.target_macs) * 100 for x in archive]
+        F = np.column_stack(([x[1] for x in archive], maep_errors))
         
         front = NonDominatedSorting().do(F, only_non_dominated_front=True)
         # non-dominated arch bit-strings
