@@ -119,8 +119,8 @@ class GIN:
         for graph, input_resolution in zip(query_graphs, input_resolutions):
             graph.input_resolution = torch.tensor([[input_resolution]], dtype=torch.float32)
         preds = predict(self.model, query_graphs, device=device)
-        if hasattr(self, 'target_mean') and self.target_mean is not None:
-            preds = preds * self.target_std + self.target_mean
+        #if hasattr(self, 'target_mean') and self.target_mean is not None:
+        #   preds = preds * self.target_std + self.target_mean
         return preds
 
 
@@ -139,12 +139,13 @@ def train(net, graph_data, trn_split=0.8, pretrained=None, device='cpu',
     if len(vld_idx) == 0:
         vld_idx = trn_idx
 
-    all_targets = torch.stack([data.y for data in graph_data])
-    target_mean = all_targets[trn_idx].mean(dim=0)
-    target_std = all_targets[trn_idx].std(dim=0) + 1e-8
-
-    for i in range(n_samples):
-        graph_data[i].y = (graph_data[i].y - target_mean) / target_std
+    # all_targets = torch.stack([data.y for data in graph_data])
+    # target_mean = all_targets[trn_idx].mean(dim=0)
+    # target_std = all_targets[trn_idx].std(dim=0) + 1e-8
+    # for i in range(n_samples):
+    #     graph_data[i].y = (graph_data[i].y - target_mean) / target_std    
+    target_mean = None
+    target_std = None
 
     trn_data = [graph_data[i] for i in trn_idx.tolist()]
     vld_data = [graph_data[i] for i in vld_idx.tolist()]
@@ -190,7 +191,7 @@ def train(net, graph_data, trn_split=0.8, pretrained=None, device='cpu',
     print(f"[FINISHED TRAIN] Best loss: {best_loss} @ epoch {epoch_of_best_loss}")
     validate(best_net, vld_loader, device=device, target_mean=target_mean, target_std=target_std)
 
-    return best_net.to('cpu'), target_mean.cpu().numpy(), target_std.cpu().numpy()
+    return best_net.to('cpu'), None, None #target_mean.cpu().numpy(), target_std.cpu().numpy()
 
 def train_one_epoch(net, loader, criterion, optimizer, device):
     net.train()
@@ -240,8 +241,8 @@ def validate(net, loader, device, target_mean, target_std):
             pred_acc, pred_complex = net(batch.x, batch.edge_index, batch.batch, batch.input_resolution)
             scaled_pred = torch.cat((pred_acc, pred_complex), dim=1)
             
-            unscaled_pred = scaled_pred * target_std.to(device) + target_mean.to(device)
-            unscaled_target = batch.y.view_as(unscaled_pred) * target_std.to(device) + target_mean.to(device)
+            unscaled_pred = scaled_pred #* target_std.to(device) + target_mean.to(device)
+            unscaled_target = batch.y.view_as(unscaled_pred) #* target_std.to(device) + target_mean.to(device)
             
             pred_list.append(unscaled_pred.cpu())
             target_list.append(unscaled_target.cpu())

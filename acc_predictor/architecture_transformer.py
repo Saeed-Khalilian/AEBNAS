@@ -43,10 +43,10 @@ class ArchitectureToGraphEncoder:
 
             x, edge_index = self._convert_architecture_to_graph(arch)
             edge_index_tensor = torch.tensor(edge_index, dtype=torch.long)
-            edge_index_undirected = to_undirected(edge_index_tensor)
+            #edge_index_undirected = to_undirected(edge_index_tensor)
             graph = Data(
                 x=torch.tensor(x, dtype=torch.float32),
-                edge_index=edge_index_undirected,
+                edge_index=edge_index_tensor,
             )
 
             if targets is not None:
