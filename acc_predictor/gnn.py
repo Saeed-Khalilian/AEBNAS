@@ -11,29 +11,52 @@ class GNN_Surrogate(nn.Module):
         super(GNN_Surrogate, self).__init__()
         self.mlp1 = nn.Sequential(
                 nn.Linear(num_node_features, hidden_dim),
-                nn.BatchNorm1d(hidden_dim),
+                #nn.BatchNorm1d(hidden_dim),
                 nn.ReLU(),
                 nn.Linear(hidden_dim, hidden_dim),
-                nn.BatchNorm1d(hidden_dim),
+                #nn.BatchNorm1d(hidden_dim),
                 nn.ReLU())
         self.conv1 = GINConv(self.mlp1)
-        self.bn1 = nn.BatchNorm1d(hidden_dim)
+        # self.bn1 = nn.BatchNorm1d(hidden_dim)
 
         self.mlp2 = nn.Sequential(
                 nn.Linear(hidden_dim, hidden_dim),
-                nn.BatchNorm1d(hidden_dim),
+                # nn.BatchNorm1d(hidden_dim),
                 nn.ReLU(),
                 nn.Linear(hidden_dim, hidden_dim),
-                nn.BatchNorm1d(hidden_dim),
+                # nn.BatchNorm1d(hidden_dim),
                 nn.ReLU())
         self.conv2 = GINConv(self.mlp2)
-        self.bn2 = nn.BatchNorm1d(hidden_dim)
+        # self.bn2 = nn.BatchNorm1d(hidden_dim)
 
-        self.readout = nn.Sequential(
-            nn.Linear(hidden_dim, output_dimension),
-            nn.BatchNorm1d(output_dimension),
-            nn.ReLU()
-        )
+        self.mlp3 = nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim),
+                # nn.BatchNorm1d(hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, hidden_dim),
+                # nn.BatchNorm1d(hidden_dim),
+                nn.ReLU())
+        self.conv3 = GINConv(self.mlp3)
+        # self.bn3 = nn.BatchNorm1d(hidden_dim)
+
+        # self.mlp4 = nn.Sequential(
+        #         nn.Linear(hidden_dim, hidden_dim),
+        #         # nn.BatchNorm1d(hidden_dim),
+        #         nn.ReLU(),
+        #         nn.Linear(hidden_dim, hidden_dim),
+        #         # nn.BatchNorm1d(hidden_dim),
+        #         nn.ReLU())
+        # self.conv4 = GINConv(self.mlp4)
+        # self.bn4 = nn.BatchNorm1d(hidden_dim)
+
+        # self.readout = nn.Sequential(
+        #     nn.Linear(hidden_dim, output_dimension),
+        #     nn.BatchNorm1d(output_dimension),
+        #     nn.ReLU()
+        # )
+        self.readout = nn.Linear(hidden_dim, output_dimension)
+
+
         # Concatenate pooled GIN representation with input resolution scalar.
         predictor_input_dim = output_dimension + 1
         
@@ -41,14 +64,14 @@ class GNN_Surrogate(nn.Module):
         
         self.accuracy_predictor = nn.Sequential(
             nn.Linear(predictor_input_dim, 64),
-            nn.BatchNorm1d(64),
+            # nn.BatchNorm1d(64),
             nn.ReLU(),
             nn.Linear(64, 1)
         )
         
         self.complexity_predictor = nn.Sequential(
             nn.Linear(predictor_input_dim, 64),
-            nn.BatchNorm1d(64),
+            # nn.BatchNorm1d(64),
             nn.ReLU(),
             nn.Linear(64, 1)
         )
@@ -56,9 +79,13 @@ class GNN_Surrogate(nn.Module):
     def forward(self, x, edge_index, batch, input_resolution):
         """Assumes that hte input resolution is normalized to [0,1]"""
         x = self.conv1(x=x, edge_index=edge_index)
-        x = self.bn1(x)
+        # x = F.relu(self.bn1(x))
         x = self.conv2(x=x, edge_index=edge_index)
-        x = self.bn2(x)
+        # x = F.relu(self.bn2(x))
+        x = self.conv3(x=x, edge_index=edge_index)
+        # x = F.relu(self.bn3(x))
+        # x = self.conv4(x=x, edge_index=edge_index)
+        # x = F.relu(self.bn4(x))
         x = global_add_pool(x, batch)
         x = self.readout(x)
 
@@ -66,7 +93,7 @@ class GNN_Surrogate(nn.Module):
             input_resolution = input_resolution.unsqueeze(1)
 
         x = torch.cat((x, input_resolution), dim=1)
-        x = self.dropout(x)
+        # x = self.dropout(x)
         
         predicted_accuracy = self.accuracy_predictor(x)
         predicted_complexity = self.complexity_predictor(x)
@@ -98,7 +125,7 @@ class GIN:
 
 
 def train(net, graph_data, trn_split=0.8, pretrained=None, device='cpu',
-          lr=5e-3, epochs=300, verbose=False):
+          lr=3e-4, epochs=500, verbose=False):
     n_samples = len(graph_data)
     if n_samples == 0:
         raise ValueError("Training set is empty")
@@ -138,25 +165,29 @@ def train(net, graph_data, trn_split=0.8, pretrained=None, device='cpu',
         # initialize the weights
         # net.apply(Net.init_weights)
         net = net.to(device)
-        optimizer = torch.optim.Adam(net.parameters(), lr=lr, weight_decay=1e-4)
+        optimizer = torch.optim.Adam(net.parameters(), lr=lr)#, weight_decay=1e-4)
         criterion = nn.SmoothL1Loss()
         # criterion = nn.MSELoss()
 
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, int(epochs), eta_min=0)
 
         best_loss = 1e33
+        epoch_of_best_loss = 0
         for epoch in range(epochs):
             loss_trn = train_one_epoch(net, trn_loader, criterion, optimizer, device)
             loss_vld = infer(net, vld_loader, criterion, device)
             scheduler.step()
             #print("loop")
-            # if epoch % 500 == 0 and verbose:
-            #     print("Epoch {:4d}: trn loss = {:.4E}, vld loss = {:.4E}".format(epoch, loss_trn, loss_vld))
+            if epoch % 50 == 0:
+                print("Epoch {:4d}: trn loss = {:.4E}, vld loss = {:.4E}".format(epoch, loss_trn, loss_vld))
 
             if loss_vld < best_loss:
                 best_loss = loss_vld
                 best_net = copy.deepcopy(net)
+                epoch_of_best_loss = epoch
 
+
+    print(f"[FINISHED TRAIN] Best loss: {best_loss} @ epoch {epoch_of_best_loss}")
     validate(best_net, vld_loader, device=device, target_mean=target_mean, target_std=target_std)
 
     return best_net.to('cpu'), target_mean.cpu().numpy(), target_std.cpu().numpy()

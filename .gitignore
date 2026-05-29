@@ -3,9 +3,10 @@ __pycache__/
 *.py[codz]
 *$py.class
 plots/
+new_calculated_hypervolumes/
 # C extensions
 *.so
-
+.vscode/*
 # Distribution / packaging
 .Python
 build/

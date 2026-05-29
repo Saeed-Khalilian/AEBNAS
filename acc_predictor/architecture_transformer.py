@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 from torch_geometric.data import Data
+from torch_geometric.utils import to_undirected
 
 class ArchitectureToGraphEncoder:
     def __init__(self,node_feature_dim=18, 
@@ -41,9 +42,11 @@ class ArchitectureToGraphEncoder:
                 raise TypeError("GIN expects architectures as dictionaries. Skip encoding to integer strings for this surrogate.")
 
             x, edge_index = self._convert_architecture_to_graph(arch)
+            edge_index_tensor = torch.tensor(edge_index, dtype=torch.long)
+            edge_index_undirected = to_undirected(edge_index_tensor)
             graph = Data(
                 x=torch.tensor(x, dtype=torch.float32),
-                edge_index=torch.tensor(edge_index, dtype=torch.long),
+                edge_index=edge_index_undirected,
             )
 
             if targets is not None:
@@ -227,10 +230,12 @@ class ArchitectureToGraphEncoder:
         node_feature = np.zeros(self._node_feature_dim) #node representation
         node_feature[1] = 1 #Interpolation
         node_feature[3] = 1 #is exit
-        normalized_block = (block+1) / 5 #normalize to [0,1]
+        normalized_block = (block+1) / self._num_of_blocks #normalize to [0,1]
         assert normalized_block >=0 and normalized_block <= 1, "normalized block not in [0,1]"
         node_feature[4] = normalized_block
-        node_feature[5] = layer #first layer of the exit
+        normalized_depth = (layer+1) / self._max_depth
+        assert normalized_depth >=0 and normalized_depth <= 1, "normalized depth not in [0,1]"
+        node_feature[5] = normalized_depth
         node_feature[14] = float(threshold)  
         interpolation_index = self._interpol_options.index(interpol_size)
         for i in range(15, 18):
