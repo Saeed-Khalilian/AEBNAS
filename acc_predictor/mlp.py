@@ -133,7 +133,7 @@ def validate(net, data, target, device):
         pred = net(data)
         pred, target = pred.cpu().detach().numpy(), target.cpu().detach().numpy()
 
-        rmse, rho, tau = get_correlation(pred, target)
+        rmse, rho, tau = get_correlation(np.ravel(pred), np.ravel(target))
 
     # print("Validation RMSE = {:.4f}, Spearman's Rho = {:.4f}, Kendall’s Tau = {:.4f}".format(rmse, rho, tau))
     return rmse, rho, tau, pred, target
