@@ -8,7 +8,7 @@ from utils import get_correlation
 
 class GNN_Surrogate(nn.Module):
     def __init__(self, num_node_features=18, hidden_dim=32, output_dimension=32,
-                 dropout_rate=0.0, num_gnn_layers=3, mlp_hidden_dim=64, activation='relu'):
+                 dropout_rate=0.0, num_gnn_layers=2, mlp_hidden_dim=64, activation='relu'):
         super(GNN_Surrogate, self).__init__()
         
         if activation.lower() == 'relu':

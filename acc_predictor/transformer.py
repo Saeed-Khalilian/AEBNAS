@@ -9,7 +9,7 @@ import warnings
 warnings.filterwarnings("ignore", message=".*nested tensors is in prototype stage.*")
 
 class TransformerSurrogate(nn.Module):
-    def __init__(self, input_dim=18, d_model=64, nhead=4, num_layers=2, dim_feedforward=128, dropout=0.1, max_seq_len=45):
+    def __init__(self, input_dim=18, d_model=16, nhead=8, num_layers=1, dim_feedforward=128, dropout=0.0, max_seq_len=45):
         super(TransformerSurrogate, self).__init__()
 
         if max_seq_len < 1:

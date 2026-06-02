@@ -134,7 +134,7 @@ def main():
             mean_acc_rho = np.mean(fold_acc_rhos)
             mean_compl_rho = np.mean(fold_compl_rhos)
             mean_rmse = np.mean(fold_rmses)
-            comb_rho = mean_acc_rho + mean_compl_rho
+            comb_rho = (mean_acc_rho + mean_compl_rho)/2
 
             print(f"  Mean Acc Rho: {mean_acc_rho:.4f}, Mean Compl Rho: {mean_compl_rho:.4f}, Comb Rho: {comb_rho:.4f}")
 
