@@ -275,10 +275,10 @@ class MSuNAS:
               path = pre + ".stats"
 
               #Remove duplicates
-              for x in archive:
-                if x[0] == arch:
-                  archive.remove(x) 
-                  break
+              #for x in archive:
+              #  if x[0] == arch:
+              #    archive.remove(x) 
+              #    break
               
               if (os.path.exists(path)):
                
