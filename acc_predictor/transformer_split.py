@@ -8,9 +8,9 @@ from utils import get_correlation
 import warnings
 warnings.filterwarnings("ignore", message=".*nested tensors is in prototype stage.*")
 
-class TransformerSurrogate(nn.Module):
+class TransformerSurrogate_Split(nn.Module):
     def __init__(self, input_dim=18, d_model=64, nhead=4, num_layers=2, dim_feedforward=128, dropout=0.1, max_seq_len=45):
-        super(TransformerSurrogate, self).__init__()
+        super(TransformerSurrogate_Split, self).__init__()
 
         if max_seq_len < 1:
             raise ValueError("max_seq_len must be at least 1")
@@ -42,7 +42,7 @@ class TransformerSurrogate(nn.Module):
         # input_dim + 1 because we concatenate Input Resolution
         predictor_input_dim = d_model + 1  # +1 for resolution scalar
 
-        self.mlp_accuracy = nn.Sequential(
+        self.final_mlp = nn.Sequential(
             nn.Linear(predictor_input_dim, 64),
             nn.LayerNorm(64),
             nn.ReLU(),
@@ -50,13 +50,13 @@ class TransformerSurrogate(nn.Module):
             nn.Linear(64, 1)
         )
         
-        self.mlp_macs = nn.Sequential(
-            nn.Linear(predictor_input_dim, 64),
-            nn.LayerNorm(64),
-            nn.ReLU(),
-            nn.Dropout(p=dropout),
-            nn.Linear(64, 1)
-        )
+        # self.mlp_macs = nn.Sequential(
+        #     nn.Linear(predictor_input_dim, 64),
+        #     nn.LayerNorm(64),
+        #     nn.ReLU(),
+        #     nn.Dropout(p=dropout),
+        #     nn.Linear(64, 1)
+        # )
 
         self._init_weights()
 
@@ -95,25 +95,25 @@ class TransformerSurrogate(nn.Module):
         combined = torch.cat([cls_out, resolution], dim=1) # (batch_size, d_model + 1)
         
         # Predict metrics
-        acc_pred = self.mlp_accuracy(combined)
-        macs_pred = self.mlp_macs(combined)
+        pred = self.final_mlp(combined)
+        # macs_pred = self.mlp_macs(combined)
         
-        return acc_pred, macs_pred
+        return pred
     
 from acc_predictor.architecture_transformer import ArchitectureToGraphEncoder
-class Transformer:
+class Transformer_Split:
     """ Transformer """
     def __init__(self, arch_encoder_kwargs=None, max_sequence_length=None, **kwargs):
         arch_encoder_kwargs = arch_encoder_kwargs or {}
         self.arch_encoder = ArchitectureToGraphEncoder(**arch_encoder_kwargs)
         sequence_length = max_sequence_length or self.arch_encoder.max_sequence_length()
-        self.model = TransformerSurrogate(max_seq_len=sequence_length, **kwargs)
-        self.name = 'transformer'
+        self.model = TransformerSurrogate_Split(max_seq_len=sequence_length, **kwargs)
+        self.name = 'transformer_split'
 
     def fit(self, x, y, **kwargs):
         train_sequences, input_resolutions, padding_masks, targets = self.arch_encoder.build_sequence_dataset(x, y)
         device = kwargs.pop('device', 'cuda' if torch.cuda.is_available() else 'cpu')
-        self.model, self.target_mean, self.target_std = train(
+        self.model = train(
             self.model,
             train_sequences,
             input_resolutions,
@@ -128,8 +128,8 @@ class Transformer:
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
         query_sequences, input_resolutions, padding_masks, _ = self.arch_encoder.build_sequence_dataset(test_data)
         preds = predict(self.model, query_sequences, input_resolutions, padding_masks, device=device)
-        if hasattr(self, 'target_mean') and self.target_mean is not None:
-            preds = preds * self.target_std + self.target_mean
+        # if hasattr(self, 'target_mean') and self.target_mean is not None:
+        #     preds = preds * self.target_std + self.target_mean
         return preds
 
 
@@ -148,13 +148,13 @@ def train(net, sequences, input_resolutions, padding_masks, targets, trn_split=0
     if len(vld_idx) == 0:
         vld_idx = trn_idx
 
-    target_mean = targets[trn_idx].mean(dim=0)
-    target_std = targets[trn_idx].std(dim=0) + 1e-8
+    # target_mean = targets[trn_idx].mean(dim=0)
+    # target_std = targets[trn_idx].std(dim=0) + 1e-8
 
-    targets_scaled = (targets - target_mean) / target_std
+    # targets_scaled = (targets - target_mean) / target_std
 
-    trn_data = TensorDataset(sequences[trn_idx], input_resolutions[trn_idx], padding_masks[trn_idx], targets_scaled[trn_idx])
-    vld_data = TensorDataset(sequences[vld_idx], input_resolutions[vld_idx], padding_masks[vld_idx], targets_scaled[vld_idx])
+    trn_data = TensorDataset(sequences[trn_idx], input_resolutions[trn_idx], padding_masks[trn_idx], targets[trn_idx])
+    vld_data = TensorDataset(sequences[vld_idx], input_resolutions[vld_idx], padding_masks[vld_idx], targets[vld_idx])
 
     trn_loader = DataLoader(trn_data, batch_size=min(16, len(trn_data)), shuffle=True)
     vld_loader = DataLoader(vld_data, batch_size=min(16, len(vld_data)), shuffle=False)
@@ -191,9 +191,9 @@ def train(net, sequences, input_resolutions, padding_masks, targets, trn_split=0
                 best_loss = loss_vld
                 best_net = copy.deepcopy(net)
 
-    validate(best_net, vld_loader, device=device, target_mean=target_mean, target_std=target_std)
+    validate(best_net, vld_loader, device=device)
 
-    return best_net.to('cpu'), target_mean.cpu().numpy(), target_std.cpu().numpy()
+    return best_net.to('cpu')
 
 
 def train_one_epoch(net, loader, criterion, optimizer, device):
@@ -206,8 +206,8 @@ def train_one_epoch(net, loader, criterion, optimizer, device):
 
         batch = [item.to(device) for item in batch]
         seq, resolution, mask, target = batch
-        pred_acc, pred_complex = net(seq, resolution, src_key_padding_mask=mask)
-        pred = torch.cat((pred_acc, pred_complex), dim=1)
+        pred= net(seq, resolution, src_key_padding_mask=mask)
+        # pred = torch.cat((pred_acc, pred_complex), dim=1)
         target = target.view_as(pred)
         loss = criterion(pred, target)
         loss.backward()
@@ -228,8 +228,8 @@ def infer(net, loader, criterion, device):
         for batch in loader:
             batch = [item.to(device) for item in batch]
             seq, resolution, mask, target = batch
-            pred_acc, pred_complex = net(seq, resolution, src_key_padding_mask=mask)
-            pred = torch.cat((pred_acc, pred_complex), dim=1)
+            pred= net(seq, resolution, src_key_padding_mask=mask)
+            # pred = torch.cat((pred_acc, pred_complex), dim=1)
             
             loss = criterion(pred, target.view_as(pred))
             running_loss += loss.item()
@@ -238,7 +238,7 @@ def infer(net, loader, criterion, device):
     return running_loss / max(n_batches, 1)
 
 
-def validate(net, loader, device, target_mean, target_std):
+def validate(net, loader, device):
     net.eval()
 
     with torch.no_grad():
@@ -246,27 +246,23 @@ def validate(net, loader, device, target_mean, target_std):
         for batch in loader:
             batch = [item.to(device) for item in batch]
             seq, resolution, mask, target = batch
-            pred_acc, pred_complex = net(seq, resolution, src_key_padding_mask=mask)
-            scaled_pred = torch.cat((pred_acc, pred_complex), dim=1)
+            pred = net(seq, resolution, src_key_padding_mask=mask)
+            target = target.view_as(pred)
             
-            unscaled_pred = scaled_pred * target_std.to(device) + target_mean.to(device)
-            unscaled_target = target.view_as(unscaled_pred) * target_std.to(device) + target_mean.to(device)
-            
-            pred_list.append(unscaled_pred.cpu())
-            target_list.append(unscaled_target.cpu())
+            pred_list.append(pred.cpu())
+            target_list.append(target.cpu())
 
         pred = torch.cat(pred_list, dim=0).detach().numpy()
         target = torch.cat(target_list, dim=0).detach().numpy()
 
         rmse_acc, rho_acc, tau_acc = get_correlation(pred[:, 0], target[:, 0])
-        rmse_comp, rho_comp, tau_comp = get_correlation(pred[:, 1], target[:, 1])
 
     return rmse_acc, rho_acc, tau_acc, pred, target
 
 
 def predict(net, sequences, input_resolutions, padding_masks, device):
     if len(sequences) == 0:
-        return np.empty((0, 2), dtype=np.float32)
+        return np.empty((0, 1), dtype=np.float32)
 
     loader = DataLoader(TensorDataset(sequences, input_resolutions, padding_masks), batch_size=min(64, len(sequences)), shuffle=False)
 
@@ -276,8 +272,7 @@ def predict(net, sequences, input_resolutions, padding_masks, device):
     with torch.no_grad():
         for batch in loader:
             seq, resolution, mask = [item.to(device) for item in batch]
-            pred_acc, pred_complex = net(seq, resolution, src_key_padding_mask=mask)
-            pred = torch.cat((pred_acc, pred_complex), dim=1)
+            pred = net(seq, resolution, src_key_padding_mask=mask)
             preds.append(pred.cpu())
 
     return torch.cat(preds, dim=0).detach().numpy()

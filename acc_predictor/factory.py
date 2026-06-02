@@ -46,6 +46,16 @@ def get_acc_predictor(model, inputs, targets, **kwargs):
         acc_predictor = Transformer(**kwargs)
         acc_predictor.fit(inputs, targets)
 
+    elif model == "gin_split":
+        from acc_predictor.gnn_split import GIN_Split
+        acc_predictor = GIN_Split(**kwargs)
+        acc_predictor.fit(inputs, targets)
+
+    elif model == "transformer_split":
+        from acc_predictor.transformer_split import Transformer_Split
+        acc_predictor = Transformer_Split(**kwargs)
+        acc_predictor.fit(inputs, targets)
+
     else:
         raise NotImplementedError
 

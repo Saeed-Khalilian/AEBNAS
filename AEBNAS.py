@@ -368,8 +368,15 @@ class MSuNAS:
         return top1_err, complexity, util ,new_threshodls
 
     def _fit_acc_predictor(self, archive):
-
-        inputs = np.array([self.search_space.encode(x[0]) for x in archive])
+        split_predictor = False
+        for predictor in self.combined_predictors:
+            if predictor in self.predictor: #gin_split or transformer_split selected
+                split_predictor = True
+        if split_predictor:
+            inputs = np.array([x[0] for x in archive])
+        else:
+            inputs = np.array([self.search_space.encode(x[0]) for x in archive])
+            
         print(len(inputs), len(inputs[0]))
         targets = np.array([x[1] for x in archive])
         print(self.predictor)
@@ -378,7 +385,14 @@ class MSuNAS:
         return acc_predictor, acc_predictor.predict(inputs)
 
     def _fit_compl_predictor(self, archive):
-        inputs = np.array([self.search_space.encode(x[0]) for x in archive])
+        split_predictor = False
+        for predictor in self.combined_predictors:
+            if predictor in self.predictor: #gin_split or transformer_split selected
+                split_predictor = True
+        if split_predictor:
+            inputs = np.array([x[0] for x in archive])
+        else:
+            inputs = np.array([self.search_space.encode(x[0]) for x in archive])
         
         targets = np.array([np.dot(x[2], x[3]) for x in archive])
         
@@ -459,9 +473,19 @@ class MSuNAS:
         else: #use seperate predictors
             compl_predicted = None
             if compl_predictor is not None:
-                compl_predicted = compl_predictor.predict(pop.get("X"))
+                if 'gin' in compl_predictor.name or 'transformer' in compl_predictor.name:
+                    decoded_pop_X = np.array([self.search_space.decode(x) for x in pop.get("X")])
+                    compl_predicted = compl_predictor.predict(decoded_pop_X)
+                else:
+                    compl_predicted = compl_predictor.predict(pop.get("X"))
             
-            return candidates, acc_predictor.predict(pop.get("X")), compl_predicted
+            if 'gin' in acc_predictor.name or 'transformer' in acc_predictor.name:
+                decoded_pop_X = np.array([self.search_space.decode(x) for x in pop.get("X")])
+                acc_predicted = acc_predictor.predict(decoded_pop_X)
+            else:
+                acc_predicted = acc_predictor.predict(pop.get("X"))
+            
+            return candidates, acc_predicted, compl_predicted
 
     @staticmethod
     def _subset_selection(pop, nd_F, K):
@@ -540,14 +564,28 @@ class AuxiliarySingleLevelProblem(Problem):
             f[:, 0] = top1_err  + 0.1 * MAEP_error
             f[:, 1] =  MAEP_error #* alpha
         elif self.compl_predictor is not None:
-            top1_err = self.acc_predictor.predict(x)[:, 0]  # predicted top1 error
-            compl_err = self.compl_predictor.predict(x)[:, 0]  # predicted compl error
+            if 'gin' in self.acc_predictor.name or 'transformer' in self.acc_predictor.name:
+                decoded_x = np.array([self.ss.decode(xi) for xi in x])
+                top1_err = self.acc_predictor.predict(decoded_x)[:, 0]  # predicted top1 error
+            else:
+                top1_err = self.acc_predictor.predict(x)[:, 0]  # predicted top1 error
+                
+            if 'gin' in self.compl_predictor.name or 'transformer' in self.compl_predictor.name:
+                decoded_x = np.array([self.ss.decode(xi) for xi in x])
+                compl_err = self.compl_predictor.predict(decoded_x)[:, 0]  # predicted compl error
+            else:
+                compl_err = self.compl_predictor.predict(x)[:, 0]  # predicted compl error
+
             #Mean Absolute Percentage Error
             MAEP_error =np.absolute( ((compl_err - desired_macs)/ desired_macs)  ) *100
             f[:, 0] = top1_err  + 0.1 * MAEP_error
             f[:, 1] =  MAEP_error #* alpha              
         else:
-            top1_err = self.acc_predictor.predict(x)[:, 0]  # predicted top1 error
+            if 'gin' in self.acc_predictor.name or 'transformer' in self.acc_predictor.name:
+                decoded_x = np.array([self.ss.decode(xi) for xi in x])
+                top1_err = self.acc_predictor.predict(decoded_x)[:, 0]  # predicted top1 error
+            else:
+                top1_err = self.acc_predictor.predict(x)[:, 0]  # predicted top1 error
             for i, (_x, acc_err) in enumerate(zip(x, top1_err)):
 
                 if(self.ss.supernet == 'resnet50_he'):
@@ -632,11 +670,11 @@ if __name__ == '__main__':
     parser.add_argument('--n_iter', type=int, default=8,
                         help='number of architectures to high-fidelity eval (low level) in each iteration')
     parser.add_argument('--predictor', type=str, default='mlp',
-                        help='which accuracy predictor model to fit (rbf/gp/cart/mlp/as/gin/transformer).' \
+                        help='which accuracy predictor model to fit (rbf/gp/cart/mlp/as/gin/transformer/gin_split/transformer_split).' \
                         ' If gin/transformer, sec_predictor is ignored, '
                         'and one predictor is made predicting both accuracy and complexity')
     parser.add_argument('--sec_predictor', type=str, default='mlp',
-                        help='which complexity predictor model to fit (rbf/gp/cart/mlp/as)')
+                        help='which complexity predictor model to fit (rbf/gp/cart/mlp/as/gin_split/transformer_split)')
     parser.add_argument('--n_gpus', type=int, default=8,
                         help='total number of available gpus')
     parser.add_argument('--gpu', type=int, default=1,
