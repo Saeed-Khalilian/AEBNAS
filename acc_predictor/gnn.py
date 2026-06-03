@@ -84,12 +84,9 @@ class GIN:
         train_graphs, input_resolutions = self.arch_encoder.build_graph_dataset(x, y)
         for graph, input_resolution in zip(train_graphs, input_resolutions):
             graph.input_resolution = torch.tensor([[input_resolution]], dtype=torch.float32)
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.model, self.target_mean, self.target_std = train(self.model, train_graphs, device=device, **self.train_kwargs)
+        self.model, self.target_mean, self.target_std = train(self.model, train_graphs, **self.train_kwargs)
 
-    def predict(self, test_data, device=None):
-        if device is None:
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    def predict(self, test_data, device='cpu'):
         query_graphs, input_resolutions = self.arch_encoder.build_graph_dataset(test_data)
         for graph, input_resolution in zip(query_graphs, input_resolutions):
             graph.input_resolution = torch.tensor([[input_resolution]], dtype=torch.float32)

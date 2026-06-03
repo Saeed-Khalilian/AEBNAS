@@ -112,20 +112,16 @@ class Transformer:
 
     def fit(self, x, y, **kwargs):
         train_sequences, input_resolutions, padding_masks, targets = self.arch_encoder.build_sequence_dataset(x, y)
-        device = kwargs.pop('device', 'cuda' if torch.cuda.is_available() else 'cpu')
         self.model, self.target_mean, self.target_std = train(
             self.model,
             train_sequences,
             input_resolutions,
             padding_masks,
             targets,
-            device=device,
             **kwargs,
         )
 
-    def predict(self, test_data, device=None):
-        if device is None:
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    def predict(self, test_data, device='cpu'):
         query_sequences, input_resolutions, padding_masks, _ = self.arch_encoder.build_sequence_dataset(test_data)
         preds = predict(self.model, query_sequences, input_resolutions, padding_masks, device=device)
         if hasattr(self, 'target_mean') and self.target_mean is not None:
@@ -163,7 +159,6 @@ def train(net, sequences, input_resolutions, padding_masks, targets, trn_split=0
         print("Constructing Transformer surrogate model with pre-trained weights")
         init = torch.load(pretrained, map_location='cpu')
         net.load_state_dict(init)
-        net = net.to(device)
         best_net = copy.deepcopy(net)
     else:
         net = net.to(device)
