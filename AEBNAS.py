@@ -199,11 +199,13 @@ class MSuNAS:
             overestimations = true_acc_tst - pred_acc_tst  # true_error - pred_error (positive = predicted accuracy > true accuracy)
             mean_overestimation = np.mean(overestimations)
             max_overestimation = np.max(overestimations)
-            log_and_print(f"[SURROGATE ANALYSIS] Iteration {it} - {self.predictor} prediction variance on candidates: {pred_variance:.6f}", self.current_log_file)
-            log_and_print(f"[SURROGATE ANALYSIS] Iteration {it} - Overestimation errors (true error - predicted error): {overestimations}", self.current_log_file)
-            log_and_print(f"[SURROGATE ANALYSIS] Iteration {it} - Mean overestimation: {mean_overestimation:.4f}%, Max overestimation: {max_overestimation:.4f}%", self.current_log_file)
-            log_and_print(f"[SURROGATE ANALYSIS] Iteration {it} - True Accuracy: {100- true_acc_tst}", self.current_log_file)
-            log_and_print(f"[SURROGATE ANALYSIS] Iteration {it} - Predicted Accuracy: {100-pred_acc_tst}", self.current_log_file)
+            log_and_print(f"[SURROGATE ANALYSIS] Iter {it} - ACCURACY", self.current_log_file)
+            log_and_print(f"[SURROGATE ANALYSIS] Iter {it} - {self.predictor} prediction variance on candidates: {pred_variance:.6f}", self.current_log_file)
+            log_and_print(f"[SURROGATE ANALYSIS] Iter {it} - Overestimation errors (true error - predicted error): {overestimations}", self.current_log_file)
+            log_and_print(f"[SURROGATE ANALYSIS] Iter {it} - Mean overestimation: {mean_overestimation:.4f}%, Max overestimation: {max_overestimation:.4f}%", self.current_log_file)
+            log_and_print(f"[SURROGATE ANALYSIS] Iter {it} - True Accuracy: {100- true_acc_tst}", self.current_log_file)
+            log_and_print(f"[SURROGATE ANALYSIS] Iter {it} - Predicted Accuracy: {100-pred_acc_tst}", self.current_log_file)
+
 
 
 
@@ -221,6 +223,16 @@ class MSuNAS:
                 
                 _, compl_rho_trn, compl_tau_trn = get_correlation(pred_comp_trn, true_comp_trn)
                 _, compl_rho_tst, compl_tau_tst = get_correlation(pred_comp_tst, true_comp_tst)
+                log_and_print(f"[SURROGATE ANALYSIS] Iteration {it} - COMPLEXITY------------", self.current_log_file)
+                pred_variance = np.var(pred_comp_tst)
+                overestimations = true_comp_tst - pred_comp_tst  # true_error - pred_error (positive = predicted accuracy > true accuracy)
+                mean_overestimation = np.mean(overestimations)
+                max_overestimation = np.max(overestimations)
+                log_and_print(f"[SURROGATE ANALYSIS] Iter {it} - {self.predictor} prediction variance on candidates: {pred_variance:.6f}", self.current_log_file)
+                log_and_print(f"[SURROGATE ANALYSIS] Iter {it} - Candidate Overestimation errors (true compl - predicted compl): {overestimations}", self.current_log_file)
+                log_and_print(f"[SURROGATE ANALYSIS] Iter {it} - Mean overestimation: {mean_overestimation:.4f}%, Max overestimation: {max_overestimation:.4f}%", self.current_log_file)
+                log_and_print(f"[SURROGATE ANALYSIS] Iter {it} - True Complexity: {true_comp_tst}", self.current_log_file)
+                log_and_print(f"[SURROGATE ANALYSIS] Iter {it} - Predicted Complexity: {pred_comp_tst}", self.current_log_file)
             else:
                 rmse_c, rho_c, tau_c = np.nan, np.nan, np.nan
                 compl_rho_trn, compl_tau_trn = np.nan, np.nan
