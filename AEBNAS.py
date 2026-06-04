@@ -19,12 +19,22 @@ from search_space.ofa_search_space import OFASearchSpace
 from acc_predictor.factory import get_acc_predictor
 from utils import prepare_eval_folder, MySampling, BinaryCrossover, MyMutation ,get_correlation 
 
+def log_and_print(message, filepath=None):
+    print(message)
+    if filepath is not None:
+        try:
+            with open(filepath, "a") as f:
+                f.write(message + "\n")
+        except Exception as e:
+            print(f"Failed writing to {filepath}: {e}")
+
 class MSuNAS:
   
     def __init__(self, kwargs):
         self.kwargs = kwargs.copy() # keep a copy of original arguments
         self.save_path = kwargs.pop('save', '.tmp')  # path to save results
         self.resume = kwargs.pop('resume', None)  # resume search from a checkpoint
+        self.current_log_file = None
         
         # Create a unique folder for this run
         now = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -144,6 +154,9 @@ class MSuNAS:
             
         # main loop of the search
         for it in range(it_start, it_start + self.iterations + 1):
+            self.current_log_file = os.path.join(self.save_path, f"iter_{it}_analysis.txt")
+            with open(self.current_log_file, "w") as f:
+                f.write(f"=== Analysis Log for Iteration {it} ===\n")
             print("fit predictors")
             if self.predictor in self.combined_predictors:# fit once
                 acc_predictor, predictions = self._fit_comb_predictor(archive)
@@ -180,6 +193,19 @@ class MSuNAS:
             _, acc_rho_tst, acc_tau_tst = get_correlation(pred_acc_tst, true_acc_tst)
             
             print("checked accuracy predictors performance")
+
+            # Print surrogate prediction variance and overestimation (false positives)
+            pred_variance = np.var(pred_acc_tst)
+            overestimations = true_acc_tst - pred_acc_tst  # true_error - pred_error (positive = predicted accuracy > true accuracy)
+            mean_overestimation = np.mean(overestimations)
+            max_overestimation = np.max(overestimations)
+            log_and_print(f"[SURROGATE ANALYSIS] Iteration {it} - {self.predictor} prediction variance on candidates: {pred_variance:.6f}", self.current_log_file)
+            log_and_print(f"[SURROGATE ANALYSIS] Iteration {it} - Overestimation errors (true error - predicted error): {overestimations}", self.current_log_file)
+            log_and_print(f"[SURROGATE ANALYSIS] Iteration {it} - Mean overestimation: {mean_overestimation:.4f}%, Max overestimation: {max_overestimation:.4f}%", self.current_log_file)
+            log_and_print(f"[SURROGATE ANALYSIS] Iteration {it} - True Accuracy: {100- true_acc_tst}", self.current_log_file)
+            log_and_print(f"[SURROGATE ANALYSIS] Iteration {it} - Predicted Accuracy: {100-pred_acc_tst}", self.current_log_file)
+
+
 
             # check for complexity predictor's performance
             true_comp_trn = np.array([np.dot(x[2], x[3]) for x in archive])
@@ -437,7 +463,8 @@ class MSuNAS:
             {'n_classes': self.n_classes, 'supernet_path': self.supernet_path, 'pretrained': self.pretrained},
             pmax = self.pmax, fmax = self.fmax, amax = self.amax, wp = self.wp, wf = self.wf, wa = self.wa, 
             penalty = self.penalty, target_macs= self.target_macs, alpha_macs = self.alpha_macs, 
-            combined_predictors=self.combined_predictors)
+            combined_predictors=self.combined_predictors,
+            log_file=self.current_log_file)
         
         # initiate a multi-objective solver to optimize the problem
         method = get_algorithm(
@@ -452,6 +479,8 @@ class MSuNAS:
         
         # check for duplicates
         not_duplicate = np.logical_not([x in [x[0] for x in archive] for x in [self.search_space.decode(x) for x in res.pop.get("X")]])
+        num_duplicates = len(not_duplicate) - np.sum(not_duplicate)
+        log_and_print(f"[GA SEARCH] NSGA-II finished. Candidates: {len(not_duplicate)} total in final pop, {num_duplicates} are duplicates of evaluated archive architectures.", self.current_log_file)
 
         # the following lines corresponding to Algo 1 line 11 / Fig. 3(c)-(d) in the paper
         # form a subset selection problem to short list K from pop_size
@@ -514,7 +543,7 @@ class AuxiliarySingleLevelProblem(Problem):
     """ The optimization problem for finding the next N candidate architectures """
 
     def __init__(self, search_space, acc_predictor, compl_predictor, sec_obj='flops', dataset='imagenet',supernet=None, pmax = 2, fmax = 100, amax = 5,
-        wp = 1, wf = 1/40, wa = 1, penalty = 10**10, target_macs = 2.44, alpha_macs = 5.0, combined_predictors= ("gin", "transformer")):
+        wp = 1, wf = 1/40, wa = 1, penalty = 10**10, target_macs = 2.44, alpha_macs = 5.0, combined_predictors= ("gin", "transformer"), log_file=None):
         """If acc_predictor.name in combined_predictors, the acc_predictor is used for both acc and compl predictions"""
         n_var = search_space.n_var #CNAS n_var=46, ADACNAS= 46 + 4(#bits for selection schemes) = 50
         if (search_space.supernet == 'resnet50_he'):
@@ -523,6 +552,7 @@ class AuxiliarySingleLevelProblem(Problem):
       
 
         self.ss = search_space
+        self.log_file = log_file
         self.acc_predictor = acc_predictor
         self.compl_predictor = compl_predictor
         self.xl = np.zeros(self.n_var)
@@ -612,6 +642,17 @@ class AuxiliarySingleLevelProblem(Problem):
                 f[i, 0] = acc_err
                 
                 f[i, 1] = np.sum(info[self.sec_obj])/len(self.sec_obj) #added the sum( ) to prevent crashing
+
+        # Print GA population surrogate prediction stats
+        acc_min, acc_max, acc_mean, acc_std = np.min(top1_err), np.max(top1_err), np.mean(top1_err), np.std(top1_err)
+        log_str = f"[GA EVAL] Pop Size: {x.shape[0]} | Pred Top1 Err: min={acc_min:.2f}%, max={acc_max:.2f}%, mean={acc_mean:.2f}%, std={acc_std:.4f}"
+        if 'compl_err' in locals() and compl_err is not None:
+            comp_min, comp_max, comp_mean, comp_std = np.min(compl_err), np.max(compl_err), np.mean(compl_err), np.std(compl_err)
+            log_str += f" | Pred Compl: min={comp_min:.2f}, max={comp_max:.2f}, mean={comp_mean:.2f}, std={comp_std:.4f}"
+        elif not np.isnan(f[:, 1]).all():
+            comp_min, comp_max, comp_mean, comp_std = np.min(f[:, 1]), np.max(f[:, 1]), np.mean(f[:, 1]), np.std(f[:, 1])
+            log_str += f" | Compl Obj: min={comp_min:.2f}, max={comp_max:.2f}, mean={comp_mean:.2f}, std={comp_std:.4f}"
+        log_and_print(log_str, self.log_file)
 
         out["F"] = f
 
