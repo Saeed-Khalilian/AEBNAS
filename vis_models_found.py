@@ -46,8 +46,9 @@ def plot_models(csv_paths, target_macs=None):
         # Find pareto front: Minimize top1_error and minimize MAEP to target_macs
         target_mac = target_macs[i] if target_macs and i < len(target_macs) else None
         if target_mac:
-            df['maep'] = np.abs((df['avg_macs'] - target_mac) / target_mac) * 100
-            costs = np.column_stack((df['top1_error'], df['maep'])).tolist()
+            df['maep'] = np.abs((df['avg_macs'] - target_mac) / target_mac) 
+            adjusted_error = df['top1_error'] + 0.2 * df['maep']
+            costs = np.column_stack((adjusted_error, df['maep'])).tolist()
         else:
             costs = df[['top1_error', 'avg_macs']].values.tolist()
             

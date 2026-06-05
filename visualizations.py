@@ -239,7 +239,7 @@ def plot_history(csv_paths, use_iterations=False):
             elif row_idx == 2:  # Accuracy Rank Correlation
                 valid_acc = df.dropna(subset=['acc_rmse'])
                 ax.plot(valid_acc[x_col], valid_acc['acc_rho'], marker='o', color='tab:blue', label='Spearman (Rho)')
-                ax.plot(valid_acc[x_col], valid_acc['acc_tau'], marker='s', color='tab:orange', label='Kendall (Tau)')
+                #ax.plot(valid_acc[x_col], valid_acc['acc_tau'], marker='s', color='tab:orange', label='Kendall (Tau)')
                 ax.set_ylabel('Correlation')
                 ax.set_xlabel(x_label)
                 ax.legend(loc='lower right')
@@ -249,7 +249,7 @@ def plot_history(csv_paths, use_iterations=False):
             elif row_idx == 3:  # Complexity Rank Correlation
                 valid_compl = df.dropna(subset=['compl_rmse'])
                 ax.plot(valid_compl[x_col], valid_compl['compl_rho'], marker='x', color='tab:green', label='Spearman (Rho)')
-                ax.plot(valid_compl[x_col], valid_compl['compl_tau'], marker='d', color='tab:red', label='Kendall (Tau)')
+                #ax.plot(valid_compl[x_col], valid_compl['compl_tau'], marker='d', color='tab:red', label='Kendall (Tau)')
                 ax.set_ylabel('Correlation')
                 ax.set_xlabel(x_label)
                 ax.legend(loc='lower right')

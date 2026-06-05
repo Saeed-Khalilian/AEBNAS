@@ -45,6 +45,14 @@ def plot_models(csv_paths, target_macs=None):
     for i, csv_path in enumerate(csv_paths):
         df = pd.read_csv(csv_path)
         
+        # Assign iteration to each row before filtering
+        indices = np.arange(len(df))
+        iterations = np.where(indices < 100, 0, 1 + (indices - 100) // 8)
+        df['iteration'] = iterations
+        
+        # Exclude the first 100 architectures (iteration 0)
+        df = df[df['iteration'] > 0].reset_index(drop=True)
+        
         # Find pareto front: Minimize top1_error and minimize avg_macs
         costs = df[['top1_error', 'avg_macs']].values.tolist()
         is_pareto = get_non_dominated(costs)
@@ -54,14 +62,8 @@ def plot_models(csv_paths, target_macs=None):
         
         # All models scatter
         # Use viridis colormap to go from purple (0) to yellow (30)
-        # The first 100 architectures: iteration 0. Then the next 8 map to iteration 1.
-        indices = np.arange(len(df))
-        iterations = np.where(indices < 100, 0, 1 + (indices - 100) // 8)
-        df['iteration'] = iterations
-
-        
         scatter = ax.scatter(df['avg_macs'], df['top1_acc'], 
-                             c=iterations, cmap='viridis', 
+                             c=df['iteration'], cmap='viridis', 
                              alpha=0.7, label='Evaluated Models', s=60, zorder=2)
         
         # Pareto front scatter
