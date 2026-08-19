@@ -961,6 +961,7 @@ class ExitBlock_Modified(MyModule):
             setattr(self, f"conv_{i}", nn.Conv2d(curDim, curDim*exp[i], kern[i], stride=2))
             setattr(self, f"batch_{i}", nn.BatchNorm2d(curDim*exp[i]))
             setattr(self, f"relu_{i}", nn.ReLU(inplace=True))
+            setattr(self, f"inter{i}", nn.Upsample(size=(self.exta[i],self.exta[i]), mode='bicubic'))
             curDim *= exp[i]
             
         self.maxpool = nn.MaxPool2d(kernel_size = 2, stride = 2)          
@@ -978,7 +979,9 @@ class ExitBlock_Modified(MyModule):
     def forward(self, x):
 
         for i in range(self.repations):
-            x = nnf.interpolate(x, size=(self.exta[i],self.exta[i]), mode='bicubic', align_corners=False)
+            #x = nnf.interpolate(x, size=(self.exta[i],self.exta[i]), mode='bicubic', align_corners=False)
+            inter = getattr(self, f"inter{i}")     
+            x = inter(x)
             conv = getattr(self, f"conv_{i}")     
             x = conv(x)
             batch = getattr(self, f"batch_{i}")     
